@@ -1,6 +1,6 @@
 {
   "name": "port-reclaim",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Safely reclaim local ports from stale development processes.",
   "author": "princegoel0",
   "license": "MIT",
