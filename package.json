@@ -1,6 +1,6 @@
 {
   "name": "port-reclaim",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Free up a port already in use: find and kill the process holding it (EADDRINUSE). Cross-platform, zero-config, Docker-safe.",
   "author": "princegoel0",
   "license": "MIT",
