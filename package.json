@@ -15,13 +15,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/princegoel0/port-reclaim.git"
+    "url": "git+https://github.com/princegoel0/port-reclaim.git"
   },
   "bugs": {
     "url": "https://github.com/princegoel0/port-reclaim/issues"
   },
   "homepage": "https://github.com/princegoel0/port-reclaim#readme",
-  "type": "module",
   "files": [
     "dist",
     "README.md",
