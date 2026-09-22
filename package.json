@@ -1,7 +1,7 @@
 {
   "name": "port-reclaim",
   "version": "0.2.0",
-  "description": "Safely reclaim local ports from stale development processes.",
+  "description": "Free up a port already in use: find and kill the process holding it (EADDRINUSE). Cross-platform, zero-config, Docker-safe.",
   "author": "princegoel0",
   "license": "MIT",
   "type": "module",
@@ -37,9 +37,15 @@
   "keywords": [
     "cli",
     "port",
-    "process",
+    "kill-port",
+    "port-killer",
+    "eaddrinuse",
+    "port-already-in-use",
+    "dev-server",
     "developer-tools",
-    "cross-platform"
+    "devtools",
+    "cross-platform",
+    "process"
   ],
   "engines": {
     "node": ">=18"
