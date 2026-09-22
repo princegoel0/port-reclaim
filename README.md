@@ -2,6 +2,17 @@
 
 A zero-configuration, cross-platform CLI for safely reclaiming ports held by stale local development processes.
 
+## Why `port-reclaim`?
+
+Tools like [`kill-port`](https://www.npmjs.com/package/kill-port) free a port by killing whatever holds it. `port-reclaim` is built for everyday development, where the process holding port 3000 is usually *yours*:
+
+- **Knows your project** — a process started from your current directory is reclaimed automatically; anything else asks first. No more killing the wrong `node`.
+- **Shows what it found** — process name, PID, working directory, and uptime. `--list` looks without touching.
+- **Never kills Docker** — ports held by `docker-proxy` or Docker Desktop are reported with a hint to stop the container instead.
+- **Multiple ports, one command** — `port-reclaim 3000 5173 8080`.
+- **TCP and UDP** — catches UDP listeners as well as TCP.
+- **Configurable** — declare ports in `package.json` or `.reclaimignore`, then plain `port-reclaim` in your `dev` script is enough.
+
 ## Install
 
 Run it once without installing:
