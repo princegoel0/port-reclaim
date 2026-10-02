@@ -1,11 +1,15 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import process from "node:process";
+import net from "node:net";
+import dgram from "node:dgram";
 import pidCwd from "pid-cwd";
 
 const execFileAsync = promisify(execFile);
 
 export type Protocol = "tcp" | "udp";
+
+export type PortState = "free" | "occupied" | "unknown";
 
 export interface PortProcess {
   pid: number;
@@ -13,26 +17,33 @@ export interface PortProcess {
   cwd?: string;
   protocol?: Protocol;
   ageMs?: number;
-  docker?: boolean;
+  refusal?: string;
 }
 
 export interface ProcessRunner {
   discover(port: number): Promise<PortProcess[]>;
   terminate(pid: number): Promise<void>;
+  probe(port: number): Promise<PortState>;
+}
+
+interface Discovered {
+  pid: number;
+  name: string;
+  protocol: Protocol;
+  ageMs?: number;
 }
 
 const DOCKER_PROCESS = /docker|vpnkit/i;
+const SYSTEM_PID_CEILING = 4;
 
-function isDockerProcess(name: string): boolean {
-  return DOCKER_PROCESS.test(name);
-}
-
-function parsePidList(output: string): number[] {
-  return [...new Set(output.split(/\r?\n/).map((line) => Number(line.trim())).filter((pid) => Number.isInteger(pid) && pid > 0))];
-}
-
-export function parseWindowsPids(output: string): number[] {
-  return parsePidList(output);
+export function refusalReason(pid: number, name: string): string | undefined {
+  if (DOCKER_PROCESS.test(name)) {
+    return "it appears to be a Docker process — stop the container instead (for example 'docker stop <container>').";
+  }
+  if (pid <= SYSTEM_PID_CEILING) {
+    return `PID ${pid} and below belong to the operating system itself — stop the service that owns the port instead.`;
+  }
+  return undefined;
 }
 
 export function parseUnixLsof(output: string): number[] {
@@ -83,6 +94,52 @@ export function parseNetstatPids(output: string, port: number): NetstatPid[] {
   return results;
 }
 
+export interface ProcessRow {
+  pid: number;
+  name: string;
+  ageMs?: number;
+  protocol?: Protocol;
+}
+
+function readProtocol(value: string | undefined): Protocol | undefined {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "tcp" || normalized === "udp") return normalized;
+  return undefined;
+}
+
+function readAge(value: string | undefined): number | undefined {
+  const ageMs = Number(value);
+  return Number.isFinite(ageMs) && ageMs > 0 ? ageMs : undefined;
+}
+
+export function parsePipeTable(output: string): ProcessRow[] {
+  const rows: ProcessRow[] = [];
+  const seen = new Set<number>();
+  for (const line of output.split(/\r?\n/)) {
+    const columns = line.trim().split("|");
+    if (columns.length < 2) continue;
+    const pid = Number(columns[0]);
+    if (!Number.isInteger(pid) || pid <= 0 || seen.has(pid)) continue;
+    seen.add(pid);
+    rows.push({ pid, name: columns[1].trim() || "unknown", ageMs: readAge(columns[2]), protocol: readProtocol(columns[3]) });
+  }
+  return rows;
+}
+
+export function parsePsTable(output: string): ProcessRow[] {
+  const rows: ProcessRow[] = [];
+  const seen = new Set<number>();
+  for (const line of output.split(/\r?\n/)) {
+    const match = /^\s*(\d+)\s+(.+?)\s+(\S+)\s*$/.exec(line);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    if (!Number.isInteger(pid) || pid <= 0 || seen.has(pid)) continue;
+    seen.add(pid);
+    rows.push({ pid, name: match[2].trim(), ageMs: parseEtime(match[3]) });
+  }
+  return rows;
+}
+
 async function run(command: string, args: string[], checked = false): Promise<string> {
   try {
     const result = await execFileAsync(command, args, { windowsHide: true, maxBuffer: 1024 * 1024 });
@@ -101,68 +158,75 @@ async function run(command: string, args: string[], checked = false): Promise<st
   }
 }
 
-async function unixPortProcesses(port: number): Promise<Map<number, Protocol>> {
-  const merged = new Map<number, Protocol>();
-  const udp = await run("lsof", ["-nP", "-iUDP:" + port, "-Fp"]);
-  for (const pid of parseUnixLsof(udp)) merged.set(pid, "udp");
-  const tcp = await run("lsof", ["-nP", "-a", "-iTCP:" + port, "-sTCP:LISTEN", "-Fp"]);
-  for (const pid of parseUnixLsof(tcp)) merged.set(pid, "tcp");
-  return merged;
+function byPid(rows: ProcessRow[]): Map<number, ProcessRow> {
+  return new Map(rows.map((row) => [row.pid, row]));
 }
 
-async function windowsPortProcesses(port: number): Promise<Map<number, Protocol>> {
-  const merged = new Map<number, Protocol>();
-  const tcpScript = `$ErrorActionPreference = 'SilentlyContinue'; Get-NetTCPConnection -LocalPort ${port} -State Listen | Select-Object -ExpandProperty OwningProcess`;
-  for (const pid of parseWindowsPids(await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", tcpScript]))) {
-    merged.set(pid, "tcp");
-  }
-  const udpScript = `$ErrorActionPreference = 'SilentlyContinue'; Get-NetUDPConnection -LocalPort ${port} | Select-Object -ExpandProperty OwningProcess`;
-  for (const pid of parseWindowsPids(await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", udpScript]))) {
-    if (!merged.has(pid)) merged.set(pid, "udp");
-  }
-  if (merged.size > 0) return merged;
-  const netstat = await run("netstat.exe", ["-ano"]);
-  for (const entry of parseNetstatPids(netstat, port)) {
-    if (!merged.has(entry.pid)) merged.set(entry.pid, entry.protocol);
-  }
-  return merged;
+function describe(pid: number, protocol: Protocol, info: ProcessRow | undefined): Discovered {
+  return { pid, protocol, name: info?.name ?? "unknown", ageMs: info?.ageMs };
 }
 
-async function processInfo(pid: number): Promise<{ name: string; ageMs?: number }> {
-  if (process.platform === "win32") {
-    const script = `$ErrorActionPreference = 'SilentlyContinue'; $p = Get-Process -Id ${pid}; if ($p) { $p.ProcessName; if ($p.StartTime) { [DateTime]::UtcNow.Subtract($p.StartTime).TotalMilliseconds } }`;
-    const output = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
-    const [name, age] = output.split(/\r?\n/);
-    const ageMs = Number(age?.trim());
-    return { name: name?.trim() || "unknown", ageMs: Number.isFinite(ageMs) && ageMs > 0 ? ageMs : undefined };
-  }
-  const output = await run("ps", ["-p", String(pid), "-o", "comm=", "-o", "etime="]);
-  const trimmed = output.trim();
-  if (!trimmed) return { name: "unknown" };
-  const match = /^(.*?)\s+(\S+)$/.exec(trimmed);
-  if (!match) return { name: trimmed };
-  return { name: match[1].trim(), ageMs: parseEtime(match[2]) };
+async function discoverUnix(port: number): Promise<Discovered[]> {
+  const protocols = new Map<number, Protocol>();
+  for (const pid of parseUnixLsof(await run("lsof", ["-nP", "-iUDP:" + port, "-Fp"]))) protocols.set(pid, "udp");
+  for (const pid of parseUnixLsof(await run("lsof", ["-nP", "-a", "-iTCP:" + port, "-sTCP:LISTEN", "-Fp"]))) protocols.set(pid, "tcp");
+  if (protocols.size === 0) return [];
+  const output = await run("ps", ["-p", [...protocols.keys()].join(","), "-o", "pid=,comm=,etime="]);
+  const infos = byPid(parsePsTable(output));
+  return [...protocols].map(([pid, protocol]) => describe(pid, protocol, infos.get(pid)));
 }
 
-async function processCwd(pid: number): Promise<string | undefined> {
-  return (await pidCwd(pid)) ?? undefined;
+function windowsNameLoop(protocol: string): string {
+  // StartTime is local-time, so compare against Now rather than UtcNow or the age comes out negative.
+  return `foreach ($id in $pids) { $proc = Get-Process -Id $id; if ($proc) { $age = ''; try { $age = [DateTime]::Now.Subtract($proc.StartTime).TotalMilliseconds } catch { }; Write-Output "$id|$($proc.ProcessName)|$age|${protocol}" } else { Write-Output "$id|unknown||${protocol}" } }`;
+}
+
+function windowsNamesScript(pids: number[]): string {
+  return [`$pids = @(${pids.join(",")})`, windowsNameLoop("")].join("; ");
+}
+
+async function discoverWindows(port: number): Promise<Discovered[]> {
+  // netstat is an order of magnitude cheaper than a PowerShell cold start, so it decides
+  // whether anything is on the port; PowerShell is only paid for when a name is needed.
+  const entries = parseNetstatPids(await run("netstat.exe", ["-ano"]), port);
+  if (entries.length === 0) return [];
+  const infos = byPid(parsePipeTable(await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", windowsNamesScript(entries.map((entry) => entry.pid))])));
+  return entries.map((entry) => describe(entry.pid, entry.protocol, infos.get(entry.pid)));
+}
+
+function probePort(port: number, protocol: Protocol): Promise<PortState> {
+  return new Promise((resolve) => {
+    if (protocol === "tcp") {
+      const server = net.createServer();
+      server.once("error", (error: NodeJS.ErrnoException) => resolve(error.code === "EADDRINUSE" ? "occupied" : "unknown"));
+      server.once("listening", () => server.close(() => resolve("free")));
+      server.listen(port);
+      return;
+    }
+    const socket = dgram.createSocket("udp4");
+    socket.once("error", (error: NodeJS.ErrnoException) => resolve(error.code === "EADDRINUSE" ? "occupied" : "unknown"));
+    socket.once("listening", () => socket.close(() => resolve("free")));
+    socket.bind(port);
+  });
+}
+
+async function probePortState(port: number): Promise<PortState> {
+  const tcp = await probePort(port, "tcp");
+  if (tcp === "occupied") return "occupied";
+  const udp = await probePort(port, "udp");
+  if (udp === "occupied") return "occupied";
+  return tcp === "free" && udp === "free" ? "free" : "unknown";
 }
 
 export function createProcessRunner(): ProcessRunner {
   return {
     async discover(port) {
-      const entries = process.platform === "win32" ? await windowsPortProcesses(port) : await unixPortProcesses(port);
-      return Promise.all([...entries].map(async ([pid, protocol]) => {
-        const info = await processInfo(pid);
-        return {
-          pid,
-          name: info.name,
-          protocol,
-          cwd: await processCwd(pid),
-          ageMs: info.ageMs,
-          docker: isDockerProcess(info.name),
-        };
-      }));
+      const discovered = process.platform === "win32" ? await discoverWindows(port) : await discoverUnix(port);
+      return Promise.all(discovered.map(async (entry) => ({
+        ...entry,
+        cwd: (await pidCwd(entry.pid)) ?? undefined,
+        refusal: refusalReason(entry.pid, entry.name),
+      })));
     },
     async terminate(pid) {
       if (process.platform === "win32") {
@@ -178,6 +242,7 @@ export function createProcessRunner(): ProcessRunner {
       } catch {
         // The process exited after SIGTERM.
       }
-    }
+    },
+    probe: probePortState,
   };
 }

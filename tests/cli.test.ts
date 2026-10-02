@@ -5,15 +5,17 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { main } from "../src/cli.js";
-import type { PortProcess, ProcessRunner } from "../src/process.js";
+import { refusalReason } from "../src/process.js";
+import type { PortProcess, PortState, ProcessRunner } from "../src/process.js";
 
 interface Calls {
   discovered: number[];
   terminated: number[];
+  probed: number[];
 }
 
-function fakeRunner(byPort: Record<number, PortProcess[]>): { runner: ProcessRunner; calls: Calls } {
-  const calls: Calls = { discovered: [], terminated: [] };
+function fakeRunner(byPort: Record<number, PortProcess[]>, probeState: PortState = "free"): { runner: ProcessRunner; calls: Calls } {
+  const calls: Calls = { discovered: [], terminated: [], probed: [] };
   return {
     calls,
     runner: {
@@ -23,6 +25,10 @@ function fakeRunner(byPort: Record<number, PortProcess[]>): { runner: ProcessRun
       },
       async terminate(pid) {
         calls.terminated.push(pid);
+      },
+      async probe(port) {
+        calls.probed.push(port);
+        return probeState;
       },
     },
   };
@@ -52,6 +58,30 @@ test("exits 0 when all ports are free", async () => {
     assert.equal(await main(["3000", "5173"], runner), 0);
     assert.deepEqual(calls.discovered, [3000, 5173]);
     assert.deepEqual(calls.terminated, []);
+  } finally {
+    output.restore();
+  }
+});
+
+test("reports a port held by a process it cannot see and exits 1", async () => {
+  const { runner, calls } = fakeRunner({}, "occupied");
+  const output = capture();
+  try {
+    assert.equal(await main(["3000"], runner), 1);
+    assert.deepEqual(calls.probed, [3000]);
+    assert.match(output.error.join("\n"), /cannot see/);
+  } finally {
+    output.restore();
+  }
+});
+
+test("does not probe ports that already have visible processes", async () => {
+  const { runner, calls } = fakeRunner({ 3000: [{ pid: 42, name: "node", cwd: process.cwd() }] });
+  const output = capture();
+  try {
+    assert.equal(await main(["3000"], runner), 0);
+    assert.deepEqual(calls.probed, []);
+    assert.deepEqual(calls.terminated, [42]);
   } finally {
     output.restore();
   }
@@ -111,12 +141,24 @@ test("--list reports without terminating", async () => {
 });
 
 test("refuses to kill Docker processes even with --yes", async () => {
-  const { runner, calls } = fakeRunner({ 3000: [{ pid: 9, name: "docker-proxy", docker: true }] });
+  const { runner, calls } = fakeRunner({ 3000: [{ pid: 9, name: "docker-proxy", refusal: refusalReason(9, "docker-proxy") }] });
   const output = capture();
   try {
     assert.equal(await main(["3000", "--yes"], runner), 1);
     assert.deepEqual(calls.terminated, []);
     assert.match(output.error.join("\n"), /Docker/);
+  } finally {
+    output.restore();
+  }
+});
+
+test("refuses to kill operating-system PIDs even with --yes", async () => {
+  const { runner, calls } = fakeRunner({ 8080: [{ pid: 4, name: "System", refusal: refusalReason(4, "System") }] });
+  const output = capture();
+  try {
+    assert.equal(await main(["8080", "--yes"], runner), 1);
+    assert.deepEqual(calls.terminated, []);
+    assert.match(output.error.join("\n"), /operating system/);
   } finally {
     output.restore();
   }

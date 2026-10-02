@@ -81,7 +81,14 @@ interface ReclaimOptions {
 async function reclaimPort(port: number, runner: ProcessRunner, options: ReclaimOptions): Promise<boolean> {
   const portProcesses = await runner.discover(port);
   if (portProcesses.length === 0) {
-    if (options.list) console.log(`Port ${port} is free.`);
+    const state = await runner.probe(port);
+    if (state === "occupied") {
+      console.error(`Port ${port} is in use by a process port-reclaim cannot see — it may belong to another user or an elevated process, or be a socket still closing. Rerun with sudo or from an elevated PowerShell session, or inspect it with 'netstat -ano | findstr :${port}'.`);
+      return false;
+    }
+    if (options.list) {
+      console.log(state === "free" ? `Port ${port} is free.` : `Port ${port} appears free but could not be verified.`);
+    }
     return true;
   }
   let free = true;
@@ -91,12 +98,12 @@ async function reclaimPort(port: number, runner: ProcessRunner, options: Reclaim
       const origin = sameDirectory(portProcess.cwd, currentDirectory)
         ? "matches the current directory"
         : portProcess.cwd ? `'${portProcess.cwd}'` : "an unreadable working directory";
-      const docker = portProcess.docker ? " [docker]" : "";
-      console.log(`Port ${port} is used by ${describe(portProcess)}${docker} — ${origin}.`);
+      const refusal = portProcess.refusal ? " [refused]" : "";
+      console.log(`Port ${port} is used by ${describe(portProcess)}${refusal} — ${origin}.`);
       continue;
     }
-    if (portProcess.docker) {
-      console.error(`Port ${port} is used by ${describe(portProcess)}, which appears to be a Docker process. Refusing to kill it — stop the container instead (for example 'docker stop <container>').`);
+    if (portProcess.refusal) {
+      console.error(`Port ${port} is used by ${describe(portProcess)}. Refusing to kill it — ${portProcess.refusal}`);
       free = false;
       continue;
     }

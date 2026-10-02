@@ -1,5 +1,20 @@
-export { createProcessRunner, parseEtime, parseNetstatPids, parseUnixLsof, parseWindowsPids } from "./process.js";
-export type { NetstatPid, PortProcess, ProcessRunner, Protocol } from "./process.js";
+export {
+  createProcessRunner,
+  parseEtime,
+  parseNetstatPids,
+  parsePipeTable,
+  parsePsTable,
+  parseUnixLsof,
+  refusalReason,
+} from "./process.js";
+export type {
+  NetstatPid,
+  PortProcess,
+  PortState,
+  ProcessRow,
+  ProcessRunner,
+  Protocol,
+} from "./process.js";
 export { loadConfig, parsePackageConfig, parseReclaimignore } from "./config.js";
 export type { ReclaimConfig } from "./config.js";
 export { parseArgs } from "./args.js";
