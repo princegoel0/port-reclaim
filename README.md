@@ -36,11 +36,11 @@ Requires Node.js 18 or newer. Supports macOS, Linux, Windows, WSL, PowerShell, a
 port-reclaim <PORT> [PORT ...]
 ```
 
-If the port is free, the command verifies it by briefly binding the port, then exits successfully. If the port is in use but no owning process is visible to the current user, the command reports that instead of claiming success. If the process working directory matches the current project, the process is terminated automatically. Processes from another directory, system services, and processes whose working directory cannot be read require explicit confirmation. Confirmation prompts show the process name, working directory, and uptime.
+If the port is free, the command verifies it by briefly binding the port, then exits successfully. If the port is in use but no owning process is visible to the current user, the command reports that instead of claiming success. If the process working directory matches the current project, the process is terminated automatically — except for known data services (`postgres`, `postmaster`, `mysqld`, `mariadbd`, `mongod`, `redis-server`, `memcached`, `etcd`), which always ask first even when they share your directory. Processes from another directory, system services, and processes whose working directory cannot be read require explicit confirmation. Confirmation prompts show the process name, working directory, and uptime.
 
 The command uses a graceful termination signal first on Unix-like systems and falls back to a forceful signal if the process remains alive. Windows uses `taskkill /F`.
 
-If confirmation is required in a non-interactive environment, the command declines safely and exits with status `1` (rerun with `--yes` to override).
+If confirmation is required in a non-interactive environment, the command declines safely and exits with status `1` (rerun with `--yes` to override). `--yes` skips prompts, including the protected-service prompt, but it cannot override a refusal — list a service's port in `.reclaimignore` to make it un-killable by accident.
 
 Ports held by Docker processes (for example `docker-proxy` or Docker Desktop) are never killed. The tool explains that the port looks like Docker and suggests stopping the container instead. The same refusal applies to operating-system PIDs (0–4, such as `System`/HTTP.sys on Windows or `systemd` on Linux), which are never signalled.
 
@@ -129,11 +129,11 @@ if (found.length === 0 && (await runner.probe(3000)) === "occupied") {
 }
 ```
 
-`discover()` reports what is on a port, `terminate()` ends one PID, and `probe()` answers whether the port is bindable at all — `"free"`, `"occupied"`, or `"unknown"` when the OS refuses to say. A `refusal` reason on a discovered process means `port-reclaim` will not kill it, whatever the caller asks; `terminate()` is still available if you decide otherwise.
+`discover()` reports what is on a port, `terminate()` ends one PID, and `probe()` answers whether the port is bindable at all — `"free"`, `"occupied"`, or `"unknown"` when the OS refuses to say. A `refusal` reason on a discovered process means `port-reclaim` will not kill it, whatever the caller asks; `terminate()` is still available if you decide otherwise. `alwaysConfirm` marks a process the CLI will not auto-kill just because it shares your directory.
 
 ## Security Notes
 
-`port-reclaim` only acts on processes listening on the port you provide. It does not scan remote hosts, and it refuses to kill Docker processes and operating-system PIDs (0–4) — stop those containers and services yourself. Ports protected by `.reclaimignore` or the `ignore` config are always skipped. Review the process name and working directory before confirming a process from another project. UDP matches are heuristic: a UDP socket on a port can belong to a client as well as a server. To confirm a port is free, the tool binds it momentarily and releases it, so a connection arriving in that instant can be reported as in use.
+`port-reclaim` only acts on processes listening on the port you provide. It does not scan remote hosts, and it refuses to kill Docker processes and operating-system PIDs (0–4) — stop those containers and services yourself. Known data services are never auto-killed even when their working directory matches yours, but `--yes` does override that prompt, so protect the ports that matter with `.reclaimignore`. Ports protected by `.reclaimignore` or the `ignore` config are always skipped. Review the process name and working directory before confirming a process from another project. UDP matches are heuristic: a UDP socket on a port can belong to a client as well as a server. To confirm a port is free, the tool binds it momentarily and releases it, so a connection arriving in that instant can be reported as in use.
 
 ## Development
 

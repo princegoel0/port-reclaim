@@ -14,7 +14,7 @@ When developing locally (Node.js, Python, Ruby, etc.), servers frequently crash 
 
 ## 3. Product Goals & Metrics
 * **Goal 1:** Eliminate the manual `lsof -i :PORT` -> `kill -9 PID` loop entirely.
-* **Goal 2:** Provide a safe mechanism that prevents developers from accidentally killing essential system services or databases.
+* **Goal 2:** Provide a safe mechanism that prevents developers from accidentally killing essential system services or databases. Three tiers: absolute refusals (Docker, OS PIDs 0–4), an always-prompt list of data services that survives the same-directory shortcut, and the user's own `.reclaimignore` / `ignore` config.
 * **Goal 3:** Seamless integration into existing NPM/Pip scripts.
 * **Success Metric:** Time to resolve an `EADDRINUSE` error drops from ~45 seconds to < 2 seconds.
 * **Measured (2026-10-02, Windows 11, Node 24):** answering "free" takes ~0.10s, identifying a busy port ~0.41s, and a full single-process reclaim ~0.59s. Metric met. The 0.2.1 implementation spent ~1.0s on a free port and ~1.3s on a busy one because discovery started PowerShell three times — see 5.3.
@@ -28,7 +28,7 @@ When developing locally (Node.js, Python, Ruby, etc.), servers frequently crash 
 
 ### 4.2 Context-Aware Resolution Strategy
 * **Scenario A: Same Project Match:** If the blocking process's CWD matches the directory where `port-reclaim` is invoked, the tool assumes it is a stale process from the current project and **automatically kills it** (SIGTERM, falling back to SIGKILL).
-* **Scenario B: Different Project / System Service:** If the CWD does *not* match, or if it is a known system process (e.g., `postgres`), the tool pauses and displays an interactive prompt.
+* **Scenario B: Different Project / System Service:** If the CWD does *not* match, the tool pauses and displays an interactive prompt. The same happens for a recognised data service (`postgres`, `postmaster`, `mysqld`, `mariadbd`, `mongod`, `redis-server`, `memcached`, `etcd`) even when its CWD *does* match — a database started from inside a project directory otherwise looks exactly like a stale dev server, and `--yes` is the only way past that prompt.
   * *Prompt Example:* `Port 3000 is used by 'node' in '/users/dev/other-project'. Kill it? (y/N)`
 * **Scenario C: Protected Process:** Docker processes (`docker-proxy`, `vpnkit`, Docker Desktop) and operating-system PIDs 0–4 (`System`/HTTP.sys on Windows, `systemd` and friends on Unix) are never signalled, even under `--yes`. The tool explains what to stop instead and exits `1`.
 
