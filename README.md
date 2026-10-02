@@ -2,6 +2,8 @@
 
 A zero-configuration, cross-platform CLI for safely reclaiming ports held by stale local development processes.
 
+![A recorded session: listing a busy port, releasing it, declining to kill a database and a Docker process, then reclaiming ports by process name](https://raw.githubusercontent.com/princegoel0/port-reclaim/main/assets/demo.gif)
+
 ## Why `port-reclaim`?
 
 Tools like [`kill-port`](https://www.npmjs.com/package/kill-port) free a port by killing whatever holds it. `port-reclaim` is built for everyday development, where the process holding port 3000 is usually *yours*:
@@ -71,7 +73,7 @@ The same safety rules apply: refusals still block Docker and operating-system PI
 
 ### Colour
 
-Successes are green, refusals and errors red, prompts yellow, and process details dim. Colour switches itself off when output is redirected, and can be forced off with `--no-color` or the `NO_COLOR` environment variable.
+Successes are green, refusals and errors red, prompts yellow, and process details dim. Colour switches itself off when output is redirected, can be forced off with `--no-color` or the `NO_COLOR` environment variable, and forced on with `FORCE_COLOR=1` for CI logs and recorded demos.
 
 ## Configuration
 
