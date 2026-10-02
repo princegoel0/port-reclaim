@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   parseEtime,
+  parseNetstatListeners,
   parseNetstatPids,
   parsePipeTable,
   parsePsTable,
   parseUnixLsof,
+  parseUnixLsofListeners,
   isProtectedService,
   refusalReason,
 } from "../src/process.js";
@@ -47,6 +49,39 @@ test("drops PID 0, keeps PID 4 for the refusal layer, and deduplicates rows", ()
   assert.deepEqual(parsePipeTable(["0|Idle|10|", "4|System|20|", "77|node|30|", "77|node|30|", "junk"].join("\r\n")), [
     { pid: 4, name: "System", ageMs: 20, protocol: undefined },
     { pid: 77, name: "node", ageMs: 30, protocol: undefined },
+  ]);
+});
+
+test("parses every listener from a full netstat table", () => {
+  const output = [
+    "  Proto  Local Address          Foreign Address        State           PID",
+    "  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       4",
+    "  TCP    127.0.0.1:3000         127.0.0.1:51234        ESTABLISHED     9999",
+    "  TCP    [::]:5173              [::]:0                 LISTENING       2222",
+    "  TCP    0.0.0.0:5173           0.0.0.0:0              LISTENING       2222",
+    "  UDP    0.0.0.0:5353           *:*                                    3333",
+    "  UDP    [::]:54321             *:*                                    0",
+  ].join("\r\n");
+  assert.deepEqual(parseNetstatListeners(output), [
+    { pid: 4, port: 135, protocol: "tcp" },
+    { pid: 2222, port: 5173, protocol: "tcp" },
+    { pid: 3333, port: 5353, protocol: "udp" },
+  ]);
+});
+
+test("parses grouped lsof field output into listeners", () => {
+  const output = [
+    "p4242",
+    "n127.0.0.1:5432",
+    "n[::1]:5432",
+    "p77",
+    "n*:3000",
+    "n/tcp",
+    "n/var/run/docker.sock",
+  ].join("\n");
+  assert.deepEqual(parseUnixLsofListeners(output, "tcp"), [
+    { pid: 4242, port: 5432, protocol: "tcp" },
+    { pid: 77, port: 3000, protocol: "tcp" },
   ]);
 });
 

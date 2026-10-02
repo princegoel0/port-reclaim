@@ -17,12 +17,14 @@ export interface PortProcess {
   cwd?: string;
   protocol?: Protocol;
   ageMs?: number;
+  ports?: number[];
   refusal?: string;
   alwaysConfirm?: boolean;
 }
 
 export interface ProcessRunner {
   discover(port: number): Promise<PortProcess[]>;
+  discoverListening(match: RegExp): Promise<PortProcess[]>;
   terminate(pid: number): Promise<void>;
   probe(port: number): Promise<PortState>;
 }
@@ -32,6 +34,12 @@ interface Discovered {
   name: string;
   protocol: Protocol;
   ageMs?: number;
+}
+
+export interface ListenerRow {
+  pid: number;
+  port: number;
+  protocol: Protocol;
 }
 
 const DOCKER_PROCESS = /docker|vpnkit/i;
@@ -78,6 +86,45 @@ export function parseEtime(value: string): number | undefined {
     [minutes, seconds] = numbers;
   }
   return (((days * 24 + hours) * 60 + minutes) * 60 + seconds) * 1000;
+}
+
+export function parseNetstatListeners(output: string): ListenerRow[] {
+  const rows: ListenerRow[] = [];
+  const seen = new Set<string>();
+  for (const line of output.split(/\r?\n/)) {
+    const columns = line.trim().split(/\s+/);
+    const protocol = columns[0]?.toUpperCase();
+    if (protocol !== "TCP" && protocol !== "UDP") continue;
+    if (protocol === "TCP" && columns[3]?.toUpperCase() !== "LISTENING") continue;
+    const port = Number(columns[1]?.split(":").at(-1));
+    const pid = Number(columns.at(-1));
+    if (!Number.isInteger(port) || port <= 0 || !Number.isInteger(pid) || pid <= 0) continue;
+    const key = `${pid}:${port}:${protocol}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ pid, port, protocol: protocol.toLowerCase() as Protocol });
+  }
+  return rows;
+}
+
+export function parseUnixLsofListeners(output: string, protocol: Protocol): ListenerRow[] {
+  const rows: ListenerRow[] = [];
+  const seen = new Set<string>();
+  let pid = 0;
+  for (const line of output.split(/\r?\n/)) {
+    if (line.startsWith("p")) {
+      pid = Number(line.slice(1));
+      continue;
+    }
+    if (!line.startsWith("n") || !Number.isInteger(pid) || pid <= 0) continue;
+    const port = Number(line.slice(1).split(":").at(-1));
+    if (!Number.isInteger(port) || port <= 0) continue;
+    const key = `${pid}:${port}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ pid, port, protocol });
+  }
+  return rows;
 }
 
 export interface NetstatPid {
@@ -175,13 +222,24 @@ function describe(pid: number, protocol: Protocol, info: ProcessRow | undefined)
   return { pid, protocol, name: info?.name ?? "unknown", ageMs: info?.ageMs };
 }
 
+function powershell(script: string): Promise<string> {
+  return run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
+}
+
+async function processNames(pids: number[]): Promise<Map<number, ProcessRow>> {
+  if (pids.length === 0) return new Map();
+  if (process.platform === "win32") {
+    return byPid(parsePipeTable(await powershell(windowsNamesScript(pids))));
+  }
+  return byPid(parsePsTable(await run("ps", ["-p", pids.join(","), "-o", "pid=,comm=,etime="])));
+}
+
 async function discoverUnix(port: number): Promise<Discovered[]> {
   const protocols = new Map<number, Protocol>();
   for (const pid of parseUnixLsof(await run("lsof", ["-nP", "-iUDP:" + port, "-Fp"]))) protocols.set(pid, "udp");
   for (const pid of parseUnixLsof(await run("lsof", ["-nP", "-a", "-iTCP:" + port, "-sTCP:LISTEN", "-Fp"]))) protocols.set(pid, "tcp");
   if (protocols.size === 0) return [];
-  const output = await run("ps", ["-p", [...protocols.keys()].join(","), "-o", "pid=,comm=,etime="]);
-  const infos = byPid(parsePsTable(output));
+  const infos = await processNames([...protocols.keys()]);
   return [...protocols].map(([pid, protocol]) => describe(pid, protocol, infos.get(pid)));
 }
 
@@ -199,8 +257,42 @@ async function discoverWindows(port: number): Promise<Discovered[]> {
   // whether anything is on the port; PowerShell is only paid for when a name is needed.
   const entries = parseNetstatPids(await run("netstat.exe", ["-ano"]), port);
   if (entries.length === 0) return [];
-  const infos = byPid(parsePipeTable(await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", windowsNamesScript(entries.map((entry) => entry.pid))])));
+  const infos = await processNames(entries.map((entry) => entry.pid));
   return entries.map((entry) => describe(entry.pid, entry.protocol, infos.get(entry.pid)));
+}
+
+async function listUnixSockets(): Promise<ListenerRow[]> {
+  const tcp = await run("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpn"]);
+  const udp = await run("lsof", ["-nP", "-iUDP", "-Fpn"]);
+  return [...parseUnixLsofListeners(tcp, "tcp"), ...parseUnixLsofListeners(udp, "udp")];
+}
+
+async function discoverListening(match: RegExp): Promise<PortProcess[]> {
+  const rows = process.platform === "win32"
+    ? parseNetstatListeners(await run("netstat.exe", ["-ano"]))
+    : await listUnixSockets();
+  const sockets = new Map<number, { ports: number[]; protocol: Protocol }>();
+  for (const row of rows) {
+    const entry = sockets.get(row.pid);
+    if (!entry) {
+      sockets.set(row.pid, { ports: [row.port], protocol: row.protocol });
+    } else {
+      if (!entry.ports.includes(row.port)) entry.ports.push(row.port);
+      if (row.protocol === "tcp") entry.protocol = "tcp";
+    }
+  }
+  const infos = await processNames([...sockets.keys()]);
+  const candidates = [...infos].filter(([, info]) => match.test(info.name));
+  return Promise.all(candidates.map(async ([pid, info]) => ({
+    pid,
+    name: info.name,
+    protocol: sockets.get(pid)?.protocol,
+    ageMs: info.ageMs,
+    ports: sockets.get(pid)?.ports.sort((left, right) => left - right),
+    cwd: (await pidCwd(pid)) ?? undefined,
+    refusal: refusalReason(pid, info.name),
+    alwaysConfirm: isProtectedService(info.name),
+  })));
 }
 
 function probePort(port: number, protocol: Protocol): Promise<PortState> {
@@ -238,6 +330,7 @@ export function createProcessRunner(): ProcessRunner {
         alwaysConfirm: isProtectedService(entry.name),
       })));
     },
+    discoverListening,
     async terminate(pid) {
       if (process.platform === "win32") {
         // Without /F, taskkill cannot end console processes such as node dev servers.

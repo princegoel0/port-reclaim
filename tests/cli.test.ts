@@ -12,16 +12,21 @@ interface Calls {
   discovered: number[];
   terminated: number[];
   probed: number[];
+  patterns: string[];
 }
 
-function fakeRunner(byPort: Record<number, PortProcess[]>, probeState: PortState = "free"): { runner: ProcessRunner; calls: Calls } {
-  const calls: Calls = { discovered: [], terminated: [], probed: [] };
+function fakeRunner(byPort: Record<number, PortProcess[]>, probeState: PortState = "free", listening: PortProcess[] = []): { runner: ProcessRunner; calls: Calls } {
+  const calls: Calls = { discovered: [], terminated: [], probed: [], patterns: [] };
   return {
     calls,
     runner: {
       async discover(port) {
         calls.discovered.push(port);
         return byPort[port] ?? [];
+      },
+      async discoverListening(match) {
+        calls.patterns.push(match.source);
+        return listening;
       },
       async terminate(pid) {
         calls.terminated.push(pid);
@@ -215,5 +220,111 @@ test("invalid input exits 2", async () => {
     assert.match(output.error.join("\n"), /Usage: port-reclaim/);
   } finally {
     output.restore();
+  }
+});
+
+function staleServer(): PortProcess[] {
+  return [{ pid: 77, name: "next-server", cwd: "/elsewhere", ports: [3000, 5173] }];
+}
+
+test("--match reclaims every port a matching process holds and kills it once", async () => {
+  const { runner, calls } = fakeRunner({}, "free", staleServer());
+  const output = capture();
+  try {
+    assert.equal(await main(["--match", "next-server", "--yes"], runner), 0);
+    assert.deepEqual(calls.patterns, ["next-server"]);
+    assert.deepEqual(calls.discovered, []);
+    assert.deepEqual(calls.terminated, [77]);
+    assert.match(output.log.join("\n"), /Released ports 3000, 5173 from next-server \(PID 77\)/);
+  } finally {
+    output.restore();
+  }
+});
+
+test("--match honours refusals for protected processes", async () => {
+  const docker = { pid: 9, name: "docker-proxy", ports: [8080], refusal: refusalReason(9, "docker-proxy") };
+  const { runner, calls } = fakeRunner({}, "free", [docker]);
+  const output = capture();
+  try {
+    assert.equal(await main(["--match", "docker", "--yes"], runner), 1);
+    assert.deepEqual(calls.terminated, []);
+    assert.match(output.error.join("\n"), /Docker/);
+  } finally {
+    output.restore();
+  }
+});
+
+test("--match skips a process holding a protected port", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "port-reclaim-"));
+  const originalCwd = process.cwd();
+  const postgres = { pid: 4242, name: "postgres", cwd: "/var/lib/postgresql", ports: [5432], alwaysConfirm: isProtectedService("postgres") };
+  const { runner, calls } = fakeRunner({}, "free", [postgres]);
+  const output = capture();
+  try {
+    await writeFile(path.join(dir, ".reclaimignore"), "5432\n");
+    process.chdir(dir);
+    assert.equal(await main(["--match", "postgres", "--yes"], runner), 0);
+    assert.deepEqual(calls.terminated, []);
+    assert.match(output.log.join("\n"), /protected/);
+  } finally {
+    process.chdir(originalCwd);
+    await rm(dir, { recursive: true, force: true });
+    output.restore();
+  }
+});
+
+test("--match reports when nothing listens under that name", async () => {
+  const { runner, calls } = fakeRunner({}, "free", []);
+  const output = capture();
+  try {
+    assert.equal(await main(["--match", "nothing-here", "--yes"], runner), 0);
+    assert.deepEqual(calls.terminated, []);
+    assert.match(output.log.join("\n"), /No listening process matches/);
+  } finally {
+    output.restore();
+  }
+});
+
+test("an invalid --match pattern exits 2", async () => {
+  const { runner } = fakeRunner({});
+  const output = capture();
+  try {
+    assert.equal(await main(["--match", "("], runner), 2);
+    assert.match(output.error.join("\n"), /not a valid regular expression/);
+  } finally {
+    output.restore();
+  }
+});
+
+test("--match cannot be combined with ports", async () => {
+  const { runner } = fakeRunner({});
+  const output = capture();
+  try {
+    assert.equal(await main(["3000", "--match", "node"], runner), 2);
+    assert.match(output.error.join("\n"), /either ports or --match/);
+  } finally {
+    output.restore();
+  }
+});
+
+test("colour codes reach a terminal and --no-color suppresses them", async () => {
+  const originalTty = process.stdout.isTTY;
+  const originalNoColor = process.env.NO_COLOR;
+  delete process.env.NO_COLOR;
+  Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+  const byPort = { 3000: [{ pid: 42, name: "node", cwd: process.cwd() }] };
+  try {
+    const coloured = capture();
+    await main(["3000"], fakeRunner(byPort).runner);
+    coloured.restore();
+    const plain = capture();
+    await main(["3000", "--no-color"], fakeRunner(byPort).runner);
+    plain.restore();
+    assert.match(coloured.log.join("\n"), /\u001b\[32m/);
+    assert.doesNotMatch(plain.log.join("\n"), /\u001b\[/);
+  } finally {
+    Object.defineProperty(process.stdout, "isTTY", { value: originalTty, configurable: true });
+    if (originalNoColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = originalNoColor;
   }
 });

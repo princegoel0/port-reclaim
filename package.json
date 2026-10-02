@@ -1,6 +1,6 @@
 {
   "name": "port-reclaim",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Free up a port already in use: find and kill the process holding it (EADDRINUSE). Cross-platform, zero-config, Docker-safe.",
   "author": "princegoel0",
   "license": "MIT",
@@ -31,7 +31,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node --test dist/tests/process.test.js dist/tests/args.test.js dist/tests/config.test.js dist/tests/cli.test.js",
+    "test": "npm run build && node --test dist/tests/process.test.js dist/tests/args.test.js dist/tests/config.test.js dist/tests/style.test.js dist/tests/cli.test.js",
     "prepublishOnly": "npm test"
   },
   "keywords": [
