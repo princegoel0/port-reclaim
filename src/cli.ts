@@ -107,7 +107,8 @@ async function reclaimPort(port: number, runner: ProcessRunner, options: Reclaim
       free = false;
       continue;
     }
-    const shouldTerminate = sameDirectory(portProcess.cwd, currentDirectory) || options.yes || await confirm(portProcess, port);
+    const sameProject = sameDirectory(portProcess.cwd, currentDirectory) && !portProcess.alwaysConfirm;
+    const shouldTerminate = sameProject || options.yes || await confirm(portProcess, port);
     if (!shouldTerminate) {
       free = false;
       continue;

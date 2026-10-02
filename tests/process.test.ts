@@ -6,6 +6,7 @@ import {
   parsePipeTable,
   parsePsTable,
   parseUnixLsof,
+  isProtectedService,
   refusalReason,
 } from "../src/process.js";
 
@@ -47,6 +48,15 @@ test("drops PID 0, keeps PID 4 for the refusal layer, and deduplicates rows", ()
     { pid: 4, name: "System", ageMs: 20, protocol: undefined },
     { pid: 77, name: "node", ageMs: 30, protocol: undefined },
   ]);
+});
+
+test("recognises data services that must never auto-kill", () => {
+  assert.equal(isProtectedService("postgres"), true);
+  assert.equal(isProtectedService("Redis-Server"), true);
+  assert.equal(isProtectedService("  mysqld  "), true);
+  assert.equal(isProtectedService("node"), false);
+  assert.equal(isProtectedService("redis-cli"), false);
+  assert.equal(isProtectedService("mongo"), false);
 });
 
 test("refuses Docker-named processes and operating-system PIDs", () => {

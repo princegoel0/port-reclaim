@@ -5,6 +5,7 @@ export {
   parsePipeTable,
   parsePsTable,
   parseUnixLsof,
+  isProtectedService,
   refusalReason,
 } from "./process.js";
 export type {

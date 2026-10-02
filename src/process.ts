@@ -18,6 +18,7 @@ export interface PortProcess {
   protocol?: Protocol;
   ageMs?: number;
   refusal?: string;
+  alwaysConfirm?: boolean;
 }
 
 export interface ProcessRunner {
@@ -35,6 +36,14 @@ interface Discovered {
 
 const DOCKER_PROCESS = /docker|vpnkit/i;
 const SYSTEM_PID_CEILING = 4;
+
+// Data services can legitimately run with their working directory inside a project, which is
+// the exact condition the same-directory auto-kill shortcut trusts. They never auto-kill.
+const PROTECTED_SERVICES = new Set(["postgres", "postmaster", "mysqld", "mariadbd", "mongod", "redis-server", "memcached", "etcd"]);
+
+export function isProtectedService(name: string): boolean {
+  return PROTECTED_SERVICES.has(name.trim().toLowerCase());
+}
 
 export function refusalReason(pid: number, name: string): string | undefined {
   if (DOCKER_PROCESS.test(name)) {
@@ -226,6 +235,7 @@ export function createProcessRunner(): ProcessRunner {
         ...entry,
         cwd: (await pidCwd(entry.pid)) ?? undefined,
         refusal: refusalReason(entry.pid, entry.name),
+        alwaysConfirm: isProtectedService(entry.name),
       })));
     },
     async terminate(pid) {

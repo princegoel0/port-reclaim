@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { main } from "../src/cli.js";
-import { refusalReason } from "../src/process.js";
+import { refusalReason, isProtectedService } from "../src/process.js";
 import type { PortProcess, PortState, ProcessRunner } from "../src/process.js";
 
 interface Calls {
@@ -93,6 +93,31 @@ test("terminates processes from the current directory without prompting", async 
   try {
     assert.equal(await main(["3000"], runner), 0);
     assert.deepEqual(calls.terminated, [42]);
+  } finally {
+    output.restore();
+  }
+});
+
+test("prompts before killing a database even when it shares the project directory", async () => {
+  const postgres = { pid: 4242, name: "postgres", cwd: process.cwd(), alwaysConfirm: isProtectedService("postgres") };
+  const { runner, calls } = fakeRunner({ 5432: [postgres] });
+  const output = capture();
+  try {
+    assert.equal(await main(["5432"], runner), 1);
+    assert.deepEqual(calls.terminated, []);
+    assert.match(output.error.join("\n"), /interactive terminal/);
+  } finally {
+    output.restore();
+  }
+});
+
+test("--yes still overrides the protected-service prompt", async () => {
+  const postgres = { pid: 4242, name: "postgres", cwd: process.cwd(), alwaysConfirm: isProtectedService("postgres") };
+  const { runner, calls } = fakeRunner({ 5432: [postgres] });
+  const output = capture();
+  try {
+    assert.equal(await main(["5432", "--yes"], runner), 0);
+    assert.deepEqual(calls.terminated, [4242]);
   } finally {
     output.restore();
   }
