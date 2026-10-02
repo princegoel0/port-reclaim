@@ -34,6 +34,7 @@ Requires Node.js 18 or newer. Supports macOS, Linux, Windows, WSL, PowerShell, a
 
 ```sh
 port-reclaim <PORT> [PORT ...]
+port-reclaim --match <REGEX>
 ```
 
 If the port is free, the command verifies it by briefly binding the port, then exits successfully. If the port is in use but no owning process is visible to the current user, the command reports that instead of claiming success. If the process working directory matches the current project, the process is terminated automatically — except for known data services (`postgres`, `postmaster`, `mysqld`, `mariadbd`, `mongod`, `redis-server`, `memcached`, `etcd`), which always ask first even when they share your directory. Processes from another directory, system services, and processes whose working directory cannot be read require explicit confirmation. Confirmation prompts show the process name, working directory, and uptime.
@@ -52,8 +53,25 @@ Both TCP and UDP listeners are discovered. Discovery costs one `netstat`/`lsof` 
 | --- | --- |
 | `-l`, `--list` | Report what is using each port without killing anything. |
 | `-y`, `--yes` | Terminate processes from other directories without prompting. |
+| `-m`, `--match REGEX` | Reclaim every port held by a process whose name matches REGEX, instead of naming ports. |
+| `--no-color` | Disable coloured output. |
 | `-h`, `--help` | Show the help message. |
 | `-v`, `--version` | Show the installed version. |
+
+### Reclaiming by process name
+
+When you do not know which ports are involved, select by command name instead. `--match` scans every listening socket, keeps the processes whose name matches the regular expression (case-insensitive), and reclaims every port each one holds:
+
+```sh
+port-reclaim --match 'next-server|vite' --list
+port-reclaim --match '^node$' --yes
+```
+
+The same safety rules apply: refusals still block Docker and operating-system PIDs, data services still prompt, and a process holding any protected port is skipped entirely. `--match` cannot be combined with port arguments, and an invalid expression exits with status `2`.
+
+### Colour
+
+Successes are green, refusals and errors red, prompts yellow, and process details dim. Colour switches itself off when output is redirected, and can be forced off with `--no-color` or the `NO_COLOR` environment variable.
 
 ## Configuration
 
@@ -129,7 +147,7 @@ if (found.length === 0 && (await runner.probe(3000)) === "occupied") {
 }
 ```
 
-`discover()` reports what is on a port, `terminate()` ends one PID, and `probe()` answers whether the port is bindable at all — `"free"`, `"occupied"`, or `"unknown"` when the OS refuses to say. A `refusal` reason on a discovered process means `port-reclaim` will not kill it, whatever the caller asks; `terminate()` is still available if you decide otherwise. `alwaysConfirm` marks a process the CLI will not auto-kill just because it shares your directory.
+`discover()` reports what is on a port, `terminate()` ends one PID, `probe()` answers whether the port is bindable at all — `"free"`, `"occupied"`, or `"unknown"` when the OS refuses to say — and `discoverListening(regex)` works the other way, returning every listening process whose name matches along with all the ports it holds. A `refusal` reason on a discovered process means `port-reclaim` will not kill it, whatever the caller asks; `terminate()` is still available if you decide otherwise. `alwaysConfirm` marks a process the CLI will not auto-kill just because it shares your directory.
 
 ## Security Notes
 

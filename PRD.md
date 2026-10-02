@@ -44,9 +44,9 @@ When developing locally (Node.js, Python, Ruby, etc.), servers frequently crash 
 ### 5.1 Proposed Stack
 * **Language:** Node.js (TypeScript) or Python. 
 * **Key Libraries (Node.js Example):**
-  * `find-process` or custom `lsof`/`netstat` parsing logic to get PIDs.
-  * `prompts` or `inquirer` for the interactive CLI confirmation.
-  * `chalk` or `kleur` for terminal styling.
+  * `find-process` or custom `lsof`/`netstat` parsing logic to get PIDs. *(shipped as custom parsing, one batched call per port.)*
+  * `prompts` or `inquirer` for the interactive CLI confirmation. *(shipped with neither — `node:readline/promises` keeps the dependency count at one.)*
+  * `chalk` or `kleur` for terminal styling. *(shipped as `src/style.ts`, ~30 lines of raw ANSI honouring `NO_COLOR`, `--no-color`, and redirected output.)*
 
 ### 5.2 Flow Logic
 1. **Input:** `port-reclaim <PORT>`
@@ -75,5 +75,7 @@ Two further constraints learned the hard way:
 
 ## 7. Future Enhancements (V2)
 * **Configurable Safe-Lists:** *(shipped — `.reclaimignore` plus a `port-reclaim` key in `package.json`, which also declares default ports.)*
-* **Regex Matching:** Allow killing by process name regex instead of exact port. Still open, and it is the last unimplemented item in this document; it needs the same safety model as ports so a pattern cannot silently reach an unrelated project.
-* **Terminal styling:** *(open — the 5.1 library list called for `chalk`/`kleur`; output is still plain text.)*
+* **Regex Matching:** *(shipped as `--match REGEX`. It scans every listening socket, matches the command name case-insensitively, and reclaims every port a match holds. The safety model is deliberately unchanged: refusals still block, data services still prompt, and a process holding any protected port is skipped rather than killed. It cannot be combined with port arguments so a mistyped pattern cannot be softened into a port list.)*
+* **Terminal styling:** *(shipped — see 5.1.)*
+
+Every item in this document is now implemented. The next revision should record new measurements and defects rather than aspirations, the way 5.3 does.
