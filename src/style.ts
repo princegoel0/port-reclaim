@@ -24,6 +24,7 @@ export function colourEnabled(): boolean {
   if (mode === "never") return false;
   if (mode === "always") return true;
   if (process.env.NO_COLOR) return false;
+  if (process.env.FORCE_COLOR && process.env.FORCE_COLOR !== "0") return true;
   return Boolean(process.stdout.isTTY);
 }
 
@@ -31,3 +32,4 @@ export function colourEnabled(): boolean {
 export function paint(colour: Colour, text: string): string {
   return colourEnabled() ? `${CODES[colour]}${text}${RESET}` : text;
 }
+
