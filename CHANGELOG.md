@@ -119,5 +119,5 @@ bumps as potentially breaking for the programmatic API.
 [0.4.0]: https://github.com/princegoel0/port-reclaim/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/princegoel0/port-reclaim/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/princegoel0/port-reclaim/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/princegoel0/port-reclaim/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/princegoel0/port-reclaim/releases/tag/v0.1.0
+[0.2.0]: https://github.com/princegoel0/port-reclaim/compare/ba220dc...v0.2.0
+[0.1.0]: https://github.com/princegoel0/port-reclaim/commit/ba220dc
