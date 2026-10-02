@@ -5,7 +5,7 @@
 When developing locally (Node.js, Python, Ruby, etc.), servers frequently crash or are stopped improperly, leaving the underlying process holding onto the port (e.g., `EADDRINUSE :::3000`). To fix this, developers must manually identify the process ID (PID) using tools like `lsof` or `netstat` and explicitly kill it. This interrupts workflow multiple times a day.
 
 ### 1.2 The Solution
-`port-reclaim` is a zero-configuration, cross-platform CLI tool that intelligently identifies and resolves port conflicts. Unlike brute-force "kill-port" tools, it determines *what* is running on the port. If the process belongs to the current project, it silently restarts it. If it belongs to a different project or system service, it prompts the user for confirmation before acting.
+`port-reclaim` is a zero-configuration, cross-platform CLI tool that intelligently identifies and resolves port conflicts. Unlike brute-force "kill-port" tools, it determines *what* is running on the port. If the process belongs to the current project, it silently reclaims the port from it. If it belongs to a different project or system service, it prompts the user for confirmation before acting. The tool frees the port only; restarting the developer's server is the caller's job, which is why the CLI is designed to chain (`port-reclaim 3000 && next dev`).
 
 ## 2. Target Audience
 * Backend Developers (Node.js, Python FastAPI/Django, Go)
@@ -17,6 +17,7 @@ When developing locally (Node.js, Python, Ruby, etc.), servers frequently crash 
 * **Goal 2:** Provide a safe mechanism that prevents developers from accidentally killing essential system services or databases.
 * **Goal 3:** Seamless integration into existing NPM/Pip scripts.
 * **Success Metric:** Time to resolve an `EADDRINUSE` error drops from ~45 seconds to < 2 seconds.
+* **Measured (2026-10-02, Windows 11, Node 24):** answering "free" takes ~0.10s, identifying a busy port ~0.41s, and a full single-process reclaim ~0.59s. Metric met. The 0.2.1 implementation spent ~1.0s on a free port and ~1.3s on a busy one because discovery started PowerShell three times — see 5.3.
 
 ## 4. Core Features
 
@@ -29,6 +30,7 @@ When developing locally (Node.js, Python, Ruby, etc.), servers frequently crash 
 * **Scenario A: Same Project Match:** If the blocking process's CWD matches the directory where `port-reclaim` is invoked, the tool assumes it is a stale process from the current project and **automatically kills it** (SIGTERM, falling back to SIGKILL).
 * **Scenario B: Different Project / System Service:** If the CWD does *not* match, or if it is a known system process (e.g., `postgres`), the tool pauses and displays an interactive prompt.
   * *Prompt Example:* `Port 3000 is used by 'node' in '/users/dev/other-project'. Kill it? (y/N)`
+* **Scenario C: Protected Process:** Docker processes (`docker-proxy`, `vpnkit`, Docker Desktop) and operating-system PIDs 0–4 (`System`/HTTP.sys on Windows, `systemd` and friends on Unix) are never signalled, even under `--yes`. The tool explains what to stop instead and exits `1`.
 
 ### 4.3 Cross-Platform Support
 * Must work consistently across macOS, Linux, and Windows (WSL and native CMD/PowerShell).
@@ -52,16 +54,26 @@ When developing locally (Node.js, Python, Ruby, etc.), servers frequently crash 
 3. **If no PID found:** Exit 0 (Success, port is free).
 4. **If PID found:** Get process metadata (Name, CWD).
 5. **Evaluate:**
-   * `If ProcessCWD == CurrentExecutionCWD:` Send `SIGKILL` to PID -> Exit 0.
+   * `If ProcessCWD == CurrentExecutionCWD:` Terminate the PID -> Exit 0.
    * `Else:` Display Prompt.
-     * `If User == Yes:` Send `SIGKILL` to PID -> Exit 0.
+     * `If User == Yes:` Terminate the PID -> Exit 0.
      * `If User == No:` Exit 1 (Failure, port remains blocked).
 
+### 5.3 Performance Constraints
+
+The success metric in section 3 is a budget, and on Windows almost all of it is process-spawn cost: one cold `powershell.exe` start is ~0.7s, while `netstat` returns in ~0.1s. Discovery must therefore stay batched — one `netstat`/`lsof` call to find the PIDs on a port, and at most one follow-up call for the names and uptimes of *all* those PIDs. Per-PID lookups multiply the budget and were the reason 0.2.1 spent ~1.3s before it had even decided to kill anything. A free port must be answered without starting PowerShell at all.
+
+Two further constraints learned the hard way:
+
+* Every OS command's output must distinguish "ran and found nothing" from "could not run". Silently swallowing errors hid a mistyped cmdlet name for a whole release.
+* `Get-Process StartTime` is local-time; comparing it against `[DateTime]::UtcNow` yields a negative age, which the display layer then drops.
+
 ## 6. Out of Scope (V1)
-* Killing Docker containers directly (will only kill the host-level binding process for now).
+* Killing Docker containers directly. The host-level binding process is left alone as well; the user is told to stop the container instead (see 4.2 Scenario C).
 * Network scanning for remote ports.
-* Managing ports bound by root-only processes.
+* Managing ports bound by root-only processes. The bind probe detects these and reports the port as unclaimable rather than free, but the tool never escalates privileges.
 
 ## 7. Future Enhancements (V2)
-* **Configurable Safe-Lists:** A `.reclaimignore` file to never touch specific ports (e.g., `5432` for Postgres).
-* **Regex Matching:** Allow killing by process name regex instead of exact port.
+* **Configurable Safe-Lists:** *(shipped — `.reclaimignore` plus a `port-reclaim` key in `package.json`, which also declares default ports.)*
+* **Regex Matching:** Allow killing by process name regex instead of exact port. Still open, and it is the last unimplemented item in this document; it needs the same safety model as ports so a pattern cannot silently reach an unrelated project.
+* **Terminal styling:** *(open — the 5.1 library list called for `chalk`/`kleur`; output is still plain text.)*
