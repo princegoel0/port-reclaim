@@ -5,7 +5,7 @@ All notable changes to `port-reclaim` are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while treating `0.x` minor
 bumps as potentially breaking for the programmatic API.
 
-## [Unreleased]
+## [0.4.1] - 2026-10-02
 
 ### Added
 
@@ -16,6 +16,8 @@ bumps as potentially breaking for the programmatic API.
 
 - A recorded demo GIF at the top of the README. Every frame is real tool output captured
   from the CLI, not a mock-up.
+- This changelog, and the contributing rules that keep the test suite and the latency budget
+  from silently regressing.
 
 ## [0.4.0] - 2026-10-02
 
@@ -113,7 +115,7 @@ bumps as potentially breaking for the programmatic API.
   belongs to the current project and after confirmation otherwise. Cross-platform for macOS,
   Linux, and Windows.
 
-[Unreleased]: https://github.com/princegoel0/port-reclaim/compare/v0.4.0...HEAD
+[0.4.1]: https://github.com/princegoel0/port-reclaim/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/princegoel0/port-reclaim/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/princegoel0/port-reclaim/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/princegoel0/port-reclaim/compare/v0.2.0...v0.2.1
