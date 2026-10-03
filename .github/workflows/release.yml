@@ -4,22 +4,62 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to create or refresh a GitHub Release for, e.g. v0.4.1'
+        required: true
+        type: string
 
 permissions:
   contents: read
   id-token: write
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
       - uses: actions/setup-node@v4
+        if: github.event_name == 'push'
         with:
           node-version: 24
           cache: npm
+
       - run: npm ci
+        if: github.event_name == 'push'
+
       - run: npm test
+        if: github.event_name == 'push'
+
       - run: npm publish --provenance --access public
+        if: github.event_name == 'push'
         env:
           NODE_AUTH_TOKEN: ""
+
+      - name: Create or refresh the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          awk -v want="## [${version}]" '
+            index($0, want) == 1 { inblock = 1; next }
+            inblock && (substr($0, 1, 4) == "## [" || substr($0, 1, 1) == "[") { inblock = 0 }
+            inblock { print }
+          ' CHANGELOG.md > notes.md 2>/dev/null || true
+
+          if [ -s notes.md ]; then
+            gh release create "$TAG" --title "$TAG" --notes-file notes.md \
+              || gh release edit "$TAG" --title "$TAG" --notes-file notes.md
+          else
+            echo "No CHANGELOG section for ${version}; falling back to generated notes."
+            gh release create "$TAG" --title "$TAG" --generate-notes \
+              || gh release edit "$TAG" --title "$TAG"
+          fi
