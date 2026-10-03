@@ -41,9 +41,16 @@ There is no token to configure and nothing to publish by hand:
 
 1. Update [CHANGELOG.md](CHANGELOG.md) and bump `version` in `package.json`.
 2. `git push origin main`, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
-3. The Release workflow runs the test suite and publishes with provenance.
+3. The Release workflow runs the test suite, publishes to npm with provenance, then opens the
+   matching GitHub Release using that version's `CHANGELOG.md` section as the notes.
 
-A version number can never be reused — if a publish fails partway, ship the next patch version.
+Keep the changelog section header in `## [X.Y.Z]` form — the workflow matches on it, and falls
+back to generated commit notes if no section matches. A version number can never be reused; if a
+publish fails partway, ship the next patch version.
+
+To create or refresh the GitHub Release for a tag that is already pushed — an older version, or
+one whose release was edited — run **Release → Run workflow** from the Actions tab and pass the
+tag. That path only touches GitHub; it never re-publishes to npm.
 
 ## Pull Requests
 
