@@ -2,6 +2,11 @@
 
 A zero-configuration, cross-platform CLI for safely reclaiming ports held by stale local development processes.
 
+[![npm version](https://img.shields.io/npm/v/port-reclaim)](https://www.npmjs.com/package/port-reclaim)
+[![downloads](https://img.shields.io/npm/dw/port-reclaim)](https://npmcharts.com/compare/port-reclaim?minimal=true)
+[![CI](https://img.shields.io/github/actions/workflow/status/princegoel0/port-reclaim/ci.yml?label=CI)](https://github.com/princegoel0/port-reclaim/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/port-reclaim)](LICENSE)
+
 ![A recorded session: listing a busy port, releasing it, declining to kill a database and a Docker process, then reclaiming ports by process name](https://raw.githubusercontent.com/princegoel0/port-reclaim/main/assets/demo.gif)
 
 ## Why `port-reclaim`?
