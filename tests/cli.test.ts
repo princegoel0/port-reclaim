@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { main } from "../src/cli.js";
 import { refusalReason, isProtectedService } from "../src/process.js";
-import type { PortProcess, PortState, ProcessRunner } from "../src/process.js";
+import type { HostListener, PortProcess, PortState, ProcessRunner } from "../src/process.js";
 
 interface Calls {
   discovered: number[];
@@ -15,7 +15,7 @@ interface Calls {
   patterns: string[];
 }
 
-function fakeRunner(byPort: Record<number, PortProcess[]>, probeState: PortState = "free", listening: PortProcess[] = []): { runner: ProcessRunner; calls: Calls } {
+function fakeRunner(byPort: Record<number, PortProcess[]>, probeState: PortState = "free", listening: PortProcess[] = [], host: HostListener | null = null): { runner: ProcessRunner; calls: Calls } {
   const calls: Calls = { discovered: [], terminated: [], probed: [], patterns: [] };
   return {
     calls,
@@ -34,6 +34,9 @@ function fakeRunner(byPort: Record<number, PortProcess[]>, probeState: PortState
       async probe(port) {
         calls.probed.push(port);
         return probeState;
+      },
+      async hostListener() {
+        return host;
       },
     },
   };
@@ -75,6 +78,20 @@ test("reports a port held by a process it cannot see and exits 1", async () => {
     assert.equal(await main(["3000"], runner), 1);
     assert.deepEqual(calls.probed, [3000]);
     assert.match(output.error.join("\n"), /cannot see/);
+  } finally {
+    output.restore();
+  }
+});
+
+test("reports a Windows-side listener under WSL2 NAT and still succeeds", async () => {
+  const { runner, calls } = fakeRunner({}, "free", [], { pid: 18804, protocol: "tcp", name: "node", kind: "windows" });
+  const output = capture();
+  try {
+    assert.equal(await main(["4920"], runner), 0);
+    assert.deepEqual(calls.terminated, []);
+    assert.match(output.error.join("\n"), /free inside WSL/);
+    assert.match(output.error.join("\n"), /'node'/);
+    assert.match(output.error.join("\n"), /PID 18804/);
   } finally {
     output.restore();
   }

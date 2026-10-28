@@ -8,9 +8,12 @@ export {
   parseUnixLsof,
   parseUnixLsofListeners,
   isProtectedService,
+  isWslInfrastructure,
   refusalReason,
+  usesNatNetworking,
 } from "./process.js";
 export type {
+  HostListener,
   ListenerRow,
   NetstatPid,
   PortProcess,

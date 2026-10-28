@@ -71,6 +71,16 @@ port-reclaim --match '^node$' --yes
 
 The same safety rules apply: refusals still block Docker and operating-system PIDs, data services still prompt, and a process holding any protected port is skipped entirely. `--match` cannot be combined with port arguments, and an invalid expression exits with status `2`.
 
+### WSL2
+
+Under WSL2's default **NAT** networking, Linux and Windows keep separate port spaces: a port held by a Windows process is invisible to `lsof` and `ss`, and binding it inside WSL succeeds. The tool detects that case through WSL's Windows interop and names the process instead of staying silent:
+
+```
+Port 4951 is free inside WSL, but a Windows tcp listener 'node.exe' (PID 19220) already holds it.
+```
+
+It still exits `0`, because the port genuinely is free in your WSL namespace and your server will start — only `localhost` from Windows keeps reaching the other process. Reclaim it from Windows, or set `networkingMode=mirrored` in `.wslconfig` to share one space. WSL's own forwarding helper (`wslrelay`) is ignored deliberately: it mirrors ports your WSL processes already serve, so reporting it would be a false alarm. Windows processes are never killed from WSL.
+
 ### Colour
 
 Successes are green, refusals and errors red, prompts yellow, and process details dim. Colour switches itself off when output is redirected, can be forced off with `--no-color` or the `NO_COLOR` environment variable, and forced on with `FORCE_COLOR=1` for CI logs and recorded demos.

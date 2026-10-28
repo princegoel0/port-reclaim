@@ -9,7 +9,9 @@ import {
   parseUnixLsof,
   parseUnixLsofListeners,
   isProtectedService,
+  isWslInfrastructure,
   refusalReason,
+  usesNatNetworking,
 } from "../src/process.js";
 
 test("parses lsof PID records", () => {
@@ -83,6 +85,22 @@ test("parses grouped lsof field output into listeners", () => {
     { pid: 4242, port: 5432, protocol: "tcp" },
     { pid: 77, port: 3000, protocol: "tcp" },
   ]);
+});
+
+test("treats only mirrored networking as safe to trust the Linux view", () => {
+  assert.equal(usesNatNetworking("nat", "Ubuntu", "Linux version 6.6"), true);
+  assert.equal(usesNatNetworking("mirrored", "Ubuntu", "Linux version 6.6"), false);
+  assert.equal(usesNatNetworking("", "Ubuntu", "Linux version 6.6"), true, "older WSL builds report no mode and only ever had NAT");
+  assert.equal(usesNatNetworking("", undefined, "Linux version 6.6 (normal kernel)"), false, "not WSL at all");
+  assert.equal(usesNatNetworking("nat", undefined, "6.6.0-microsoft-standard-WSL2"), true, "detected via /proc/version");
+});
+
+test("does not mistake WSL's own relay for a foreign Windows holder", () => {
+  assert.equal(isWslInfrastructure("wslrelay"), true);
+  assert.equal(isWslInfrastructure("WSLService"), true);
+  assert.equal(isWslInfrastructure("node"), false);
+  assert.equal(isWslInfrastructure("System"), false);
+  assert.equal(isWslInfrastructure(""), false);
 });
 
 test("recognises data services that must never auto-kill", () => {

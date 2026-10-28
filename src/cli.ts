@@ -119,6 +119,15 @@ async function reclaimPort(port: number, runner: ProcessRunner, options: Reclaim
       console.error(`Rerun with sudo or from an elevated PowerShell session, or inspect it with 'netstat -ano | findstr :${port}'.`);
       return false;
     }
+    const host = await runner.hostListener(port);
+    if (host) {
+      // Success is correct here: the port really is bindable in this namespace. The tool can
+      // report the host-side owner but cannot signal across the boundary, so it must not fail
+      // a chained dev script that will start fine.
+      console.error(paint("yellow", `Port ${port} is free inside WSL, but a Windows ${host.protocol} listener${host.name ? ` '${host.name}'` : ""} (PID ${host.pid}) already holds it.`));
+      console.error(`WSL2's default NAT networking keeps the two apart: a server started here binds fine, yet localhost:${port} from Windows still reaches the Windows process. Reclaim it from Windows, or set networkingMode=mirrored in .wslconfig.`);
+      return true;
+    }
     if (options.list) {
       console.log(state === "free" ? paint("green", `Port ${port} is free.`) : paint("yellow", `Port ${port} appears free but could not be verified.`));
     }

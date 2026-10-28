@@ -34,6 +34,7 @@ When developing locally (Node.js, Python, Ruby, etc.), servers frequently crash 
 
 ### 4.3 Cross-Platform Support
 * Must work consistently across macOS, Linux, and Windows (WSL and native CMD/PowerShell).
+* Under WSL2's default NAT networking the Linux and Windows port spaces are separate, so a Windows-held port reads as free. The tool must say so — naming the Windows process found through interop — rather than stay silent, and must not treat WSL's own `wslrelay` forwarder as a foreign holder. Verified on WSL2 Ubuntu in NAT mode.
 
 ### 4.4 CLI Integration
 * Designed to be chained in package managers.
@@ -71,6 +72,7 @@ Two further constraints learned the hard way:
 ## 6. Out of Scope (V1)
 * Killing Docker containers directly. The host-level binding process is left alone as well; the user is told to stop the container instead (see 4.2 Scenario C).
 * Network scanning for remote ports.
+* Terminating Windows processes from inside WSL. Windows PIDs live in a different namespace than Linux ones, so a Windows PID handed to `process.kill()` could signal an unrelated local process. Host-side listeners are reported only.
 * Managing ports bound by root-only processes. The bind probe detects these and reports the port as unclaimable rather than free, but the tool never escalates privileges.
 
 ## 7. Future Enhancements (V2)

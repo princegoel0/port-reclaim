@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import process from "node:process";
+import { readFile } from "node:fs/promises";
 import net from "node:net";
 import dgram from "node:dgram";
 import pidCwd from "pid-cwd";
@@ -22,11 +23,19 @@ export interface PortProcess {
   alwaysConfirm?: boolean;
 }
 
+export interface HostListener {
+  pid: number;
+  protocol: Protocol;
+  name: string;
+  kind: "windows";
+}
+
 export interface ProcessRunner {
   discover(port: number): Promise<PortProcess[]>;
   discoverListening(match: RegExp): Promise<PortProcess[]>;
   terminate(pid: number): Promise<void>;
   probe(port: number): Promise<PortState>;
+  hostListener(port: number): Promise<HostListener | null>;
 }
 
 interface Discovered {
@@ -319,6 +328,68 @@ async function probePortState(port: number): Promise<PortState> {
   return tcp === "free" && udp === "free" ? "free" : "unknown";
 }
 
+export function usesNatNetworking(networkingMode: string, distroName: string | undefined, procVersion: string): boolean {
+  if (!distroName && !/microsoft/i.test(procVersion)) return false;
+  const mode = networkingMode.trim().toLowerCase();
+  // WSL builds without the flag only ever offered NAT, so an unknown mode is treated as NAT.
+  return mode === "" || mode === "nat";
+}
+
+let wslNat: boolean | undefined;
+
+async function wslinfoMode(): Promise<string> {
+  try {
+    return (await run("wslinfo", ["--networking-mode"])).trim();
+  } catch {
+    return "";
+  }
+}
+
+async function detectWslNat(): Promise<boolean> {
+  if (wslNat !== undefined) return wslNat;
+  wslNat = false;
+  if (process.platform === "linux") {
+    const version = await readFile("/proc/version", "utf8").catch(() => "");
+    if (version || process.env.WSL_DISTRO_NAME) {
+      wslNat = usesNatNetworking(await wslinfoMode(), process.env.WSL_DISTRO_NAME, version);
+    }
+  }
+  return wslNat;
+}
+
+// wslrelay is WSL's own localhost-forwarding helper: it appears on the Windows side as a
+// listener for a port a WSL process is serving, so treating it as a foreign holder is wrong.
+export function isWslInfrastructure(name: string): boolean {
+  return /^wsl/i.test(name.trim());
+}
+
+async function windowsProcessName(pid: number): Promise<string> {
+  try {
+    const output = await run("tasklist.exe", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"]);
+    return /^"([^"]+)"/.exec(output.trim())?.[1] ?? "";
+  } catch {
+    return "";
+  }
+}
+
+// Under NAT, a Windows listener is invisible to lsof/ss and does not block binding, so the
+// port reads as free while Windows still answers localhost. These PIDs belong to a different
+// namespace and are reported only — they must never reach terminate().
+async function hostListener(port: number): Promise<HostListener | null> {
+  if (!(await detectWslNat())) return null;
+  let output: string;
+  try {
+    output = await run("netstat.exe", ["-ano"]);
+  } catch {
+    return null;
+  }
+  const [entry] = parseNetstatPids(output, port);
+  if (!entry) return null;
+  const name = await windowsProcessName(entry.pid);
+  if (isWslInfrastructure(name)) return null;
+  return { pid: entry.pid, protocol: entry.protocol, name, kind: "windows" };
+}
+
 export function createProcessRunner(): ProcessRunner {
   return {
     async discover(port) {
@@ -347,5 +418,6 @@ export function createProcessRunner(): ProcessRunner {
       }
     },
     probe: probePortState,
+    hostListener,
   };
 }
