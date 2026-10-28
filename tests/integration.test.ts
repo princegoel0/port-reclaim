@@ -10,7 +10,6 @@ import { createProcessRunner } from "../src/process.js";
 // cmdlet name or a missing taskkill flag; these two can.
 const LISTENER = [
   "const net = require('net'), dgram = require('dgram');",
-  // With `node -e`, the first argument after the script lands in argv[1], not argv[2].
   "if (process.argv[1] === 'udp') {",
   "  const s = dgram.createSocket('udp4');",
   "  s.bind(0, '127.0.0.1', () => console.log(JSON.stringify({ port: s.address().port })));",
@@ -24,10 +23,15 @@ interface Running {
   child: ChildProcess;
   pid: number;
   port: number;
+  exited: Promise<void>;
 }
 
 function start(kind: "tcp" | "udp"): Promise<Running> {
   const child = spawn(process.execPath, ["-e", LISTENER, kind], { stdio: ["ignore", "pipe", "pipe"] });
+  // Settled at spawn time, not after terminate(): the child dies from a signal, so exitCode
+  // stays null, and a listener registered once terminate() has returned never fires because the
+  // event was already delivered.
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
   return new Promise<Running>((resolve, reject) => {
     let stdout = "";
     let stderr = "";
@@ -36,7 +40,7 @@ function start(kind: "tcp" | "udp"): Promise<Running> {
       const end = stdout.indexOf("\n");
       if (end < 0 || child.pid === undefined) return;
       const { port } = JSON.parse(stdout.slice(0, end)) as { port: number };
-      resolve({ child, pid: child.pid, port });
+      resolve({ child, pid: child.pid, port, exited });
     });
     child.stderr?.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
@@ -45,9 +49,14 @@ function start(kind: "tcp" | "udp"): Promise<Running> {
   });
 }
 
-function waitForExit(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null) return Promise.resolve();
-  return new Promise((resolve) => child.once("exit", () => resolve()));
+// Releasing a bound port is not instantaneous across platforms, so poll rather than assume.
+async function waitUntilFree(runner: ReturnType<typeof createProcessRunner>, port: number): Promise<boolean> {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (await runner.probe(port) === "free") return true;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  return false;
 }
 
 test("finds and releases a real TCP listener using the platform path", async (context) => {
@@ -58,7 +67,7 @@ test("finds and releases a real TCP listener using the platform path", async (co
     context.skip(`cannot bind a local socket in this environment: ${(error as Error).message}`);
     return;
   }
-  const { child, pid, port } = running;
+  const { child, pid, port, exited } = running;
   const runner = createProcessRunner();
   try {
     const found = await runner.discover(port);
@@ -68,8 +77,8 @@ test("finds and releases a real TCP listener using the platform path", async (co
     assert.equal(match.protocol, "tcp");
     assert.equal(match.refusal, undefined, "a plain node server must not be protected");
     await runner.terminate(pid);
-    await waitForExit(child);
-    assert.equal(await runner.probe(port), "free");
+    await exited;
+    assert.ok(await waitUntilFree(runner, port), `port ${port} should be bindable again after the listener was released`);
   } finally {
     child.kill();
   }
@@ -83,7 +92,7 @@ test("finds a real UDP socket, which Windows discovery silently missed", async (
     context.skip(`cannot bind a local socket in this environment: ${(error as Error).message}`);
     return;
   }
-  const { child, pid, port } = running;
+  const { child, pid, port, exited } = running;
   const runner = createProcessRunner();
   try {
     const found = await runner.discover(port);
@@ -91,7 +100,7 @@ test("finds a real UDP socket, which Windows discovery silently missed", async (
     assert.ok(match, `expected to find UDP PID ${pid} on port ${port}, saw ${JSON.stringify(found)}`);
     assert.equal(match.protocol, "udp");
     await runner.terminate(pid);
-    await waitForExit(child);
+    await exited;
   } finally {
     child.kill();
   }
