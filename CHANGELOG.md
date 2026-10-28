@@ -5,6 +5,29 @@ All notable changes to `port-reclaim` are documented here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while treating `0.x` minor
 bumps as potentially breaking for the programmatic API.
 
+## [0.5.0] - 2026-10-27
+
+### Added
+
+- **WSL2 awareness.** Under WSL2's default NAT networking, a port held by a Windows process is
+  invisible to `lsof`/`ss` and binds cleanly inside Linux, so the port read as free while
+  Windows still answered `localhost`. The tool now names the Windows process instead, verified
+  against a real WSL2 instance. It reports only: Windows PIDs live in another namespace, so
+  signalling one could hit an unrelated local process. WSL's own `wslrelay` forwarder is
+  ignored deliberately, because it mirrors ports your WSL processes already serve.
+- `--json` / `-j`: one machine-readable document per run, with a `state` per port (`free`,
+  `occupied`, `invisible`, `host-occupied`, `unverifiable`, `protected`) and the full process
+  record. Report-only, and it refuses to combine with `--yes`.
+- Dependabot for npm and GitHub Actions, reviewed monthly.
+- README badges for version, downloads, CI status and license.
+
+### Testing
+
+- New integration tests spawn real TCP and UDP listeners in their own process and make the
+  actual runner discover, terminate and re-probe them. Unit tests with a fake runner cannot
+  catch a wrong cmdlet name or a missing `taskkill` flag, both of which shipped previously; the
+  UDP case is the regression test for `Get-NetUDPConnection`.
+
 ## [0.4.1] - 2026-10-02
 
 ### Added
@@ -115,6 +138,7 @@ bumps as potentially breaking for the programmatic API.
   belongs to the current project and after confirmation otherwise. Cross-platform for macOS,
   Linux, and Windows.
 
+[0.5.0]: https://github.com/princegoel0/port-reclaim/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/princegoel0/port-reclaim/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/princegoel0/port-reclaim/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/princegoel0/port-reclaim/compare/v0.2.1...v0.3.0
