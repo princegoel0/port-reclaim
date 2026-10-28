@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { parseArgs } from "../src/args.js";
 
-const EMPTY = { ports: [], help: false, version: false, yes: false, list: false, noColor: false };
+const EMPTY = { ports: [], help: false, version: false, yes: false, list: false, noColor: false, json: false };
 
 test("parses multiple ports and deduplicates", () => {
   assert.deepEqual(parseArgs(["3000", "5173", "3000"]), { ...EMPTY, ports: [3000, 5173] });
@@ -14,6 +14,11 @@ test("parses flags", () => {
   assert.deepEqual(parseArgs(["--help"]), { ...EMPTY, help: true });
   assert.deepEqual(parseArgs(["-v"]), { ...EMPTY, version: true });
   assert.deepEqual(parseArgs(["--no-color", "3000"]), { ...EMPTY, noColor: true, ports: [3000] });
+});
+
+test("parses --json", () => {
+  assert.deepEqual(parseArgs(["--json", "3000"]), { ...EMPTY, json: true, ports: [3000] });
+  assert.deepEqual(parseArgs(["-j", "3000"]), { ...EMPTY, json: true, ports: [3000] });
 });
 
 test("parses --match with a pattern", () => {

@@ -5,7 +5,7 @@ import process from "node:process";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { createProcessRunner, type PortProcess, type ProcessRunner } from "./process.js";
+import { createProcessRunner, type HostListener, type PortProcess, type ProcessRunner } from "./process.js";
 import { parseArgs } from "./args.js";
 import { loadConfig } from "./config.js";
 import { paint, setColourMode } from "./style.js";
@@ -18,6 +18,7 @@ Options:
   -l, --list         Report what is using each port without killing anything.
   -y, --yes          Terminate processes without prompting (never overrides a refusal).
   -m, --match REGEX  Reclaim every port held by a process whose name matches REGEX.
+  -j, --json         Print a machine-readable report; never terminates anything.
       --no-color     Disable coloured output.
   -h, --help         Show this help message.
   -v, --version      Show the installed version.
@@ -178,6 +179,51 @@ async function reclaimMatching(runner: ProcessRunner, options: ReclaimOptions, p
   return exitCode;
 }
 
+interface PortReport {
+  port: number;
+  state: "free" | "occupied" | "invisible" | "unverifiable" | "protected" | "host-occupied";
+  processes: PortProcess[];
+  host: HostListener | null;
+}
+
+async function describePort(port: number, runner: ProcessRunner, ignored: Set<number>): Promise<PortReport> {
+  if (ignored.has(port)) return { port, state: "protected", processes: [], host: null };
+  const processes = await runner.discover(port);
+  if (processes.length > 0) return { port, state: "occupied", processes, host: null };
+  const state = await runner.probe(port);
+  if (state === "occupied") return { port, state: "invisible", processes, host: null };
+  const host = await runner.hostListener(port);
+  if (host) return { port, state: "host-occupied", processes, host };
+  return { port, state: state === "free" ? "free" : "unverifiable", processes, host: null };
+}
+
+async function reportJson(ports: number[], runner: ProcessRunner, ignored: Set<number>): Promise<number> {
+  const results: PortReport[] = [];
+  for (const port of ports) results.push(await describePort(port, runner, ignored));
+  console.log(JSON.stringify({ ports: results }));
+  return 0;
+}
+
+async function reportMatchJson(runner: ProcessRunner, pattern: string, ignored: Set<number>): Promise<number> {
+  const found = await runner.discoverListening(new RegExp(pattern, "i"));
+  const byPort = new Map<number, PortProcess[]>();
+  for (const portProcess of found) {
+    for (const port of portProcess.ports ?? []) {
+      const listed = byPort.get(port);
+      if (listed) listed.push(portProcess);
+      else byPort.set(port, [portProcess]);
+    }
+  }
+  const results: PortReport[] = [];
+  for (const port of [...byPort.keys()].sort((left, right) => left - right)) {
+    results.push(ignored.has(port)
+      ? { port, state: "protected", processes: [], host: null }
+      : { port, state: "occupied", processes: byPort.get(port) ?? [], host: null });
+  }
+  console.log(JSON.stringify({ match: pattern, ports: results }));
+  return 0;
+}
+
 export async function main(argv: string[] = process.argv.slice(2), runner: ProcessRunner = createProcessRunner()): Promise<number> {
   const options = parseArgs(argv);
   if (!options) {
@@ -193,6 +239,10 @@ export async function main(argv: string[] = process.argv.slice(2), runner: Proce
     console.log(await version());
     return 0;
   }
+  if (options.json && options.yes) {
+    console.error(paint("red", "port-reclaim: --json only reports and never terminates, so it cannot be combined with --yes."));
+    return 2;
+  }
 
   const config = await loadConfig(process.cwd());
   const ignored = new Set(config.ignore);
@@ -207,6 +257,7 @@ export async function main(argv: string[] = process.argv.slice(2), runner: Proce
       printUsage();
       return 2;
     }
+    if (options.json) return reportMatchJson(runner, options.match, ignored);
     return reclaimMatching(runner, options, options.match, ignored);
   }
 
@@ -215,6 +266,7 @@ export async function main(argv: string[] = process.argv.slice(2), runner: Proce
     printUsage();
     return 2;
   }
+  if (options.json) return reportJson(ports, runner, ignored);
 
   let exitCode = 0;
   for (const port of ports) {

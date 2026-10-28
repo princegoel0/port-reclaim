@@ -244,6 +244,64 @@ function staleServer(): PortProcess[] {
   return [{ pid: 77, name: "next-server", cwd: "/elsewhere", ports: [3000, 5173] }];
 }
 
+test("--json reports a busy port without terminating anything", async () => {
+  const { runner, calls } = fakeRunner({ 3000: [{ pid: 7, name: "node", cwd: "/elsewhere", protocol: "tcp", ageMs: 5000 }] });
+  const output = capture();
+  try {
+    assert.equal(await main(["3000", "--json"], runner), 0);
+    assert.deepEqual(calls.terminated, []);
+    const report = JSON.parse(output.log.join(""));
+    assert.equal(report.ports[0].port, 3000);
+    assert.equal(report.ports[0].state, "occupied");
+    assert.equal(report.ports[0].processes[0].pid, 7);
+    assert.equal(report.ports[0].processes[0].name, "node");
+  } finally {
+    output.restore();
+  }
+});
+
+test("--json distinguishes free, invisible, and Windows-side ports", async () => {
+  const cases: Array<[string, ReturnType<typeof fakeRunner>, string]> = [
+    ["free", fakeRunner({}), "free"],
+    ["invisible", fakeRunner({}, "occupied"), "invisible"],
+    ["host", fakeRunner({}, "free", [], { pid: 18804, protocol: "tcp", name: "node.exe", kind: "windows" }), "host-occupied"],
+  ];
+  for (const [label, { runner }, expected] of cases) {
+    const output = capture();
+    try {
+      assert.equal(await main(["4700", "--json"], runner), 0, label);
+      assert.equal(JSON.parse(output.log.join("")).ports[0].state, expected, label);
+    } finally {
+      output.restore();
+    }
+  }
+});
+
+test("--json with --match groups the matched processes by port", async () => {
+  const { runner, calls } = fakeRunner({}, "free", staleServer());
+  const output = capture();
+  try {
+    assert.equal(await main(["--match", "next-server", "--json"], runner), 0);
+    assert.deepEqual(calls.terminated, []);
+    const report = JSON.parse(output.log.join(""));
+    assert.equal(report.match, "next-server");
+    assert.deepEqual(report.ports.map((entry: { port: number }) => entry.port), [3000, 5173]);
+  } finally {
+    output.restore();
+  }
+});
+
+test("--json cannot be combined with --yes", async () => {
+  const { runner } = fakeRunner({});
+  const output = capture();
+  try {
+    assert.equal(await main(["3000", "--json", "--yes"], runner), 2);
+    assert.match(output.error.join("\n"), /only reports and never terminates/);
+  } finally {
+    output.restore();
+  }
+});
+
 test("--match reclaims every port a matching process holds and kills it once", async () => {
   const { runner, calls } = fakeRunner({}, "free", staleServer());
   const output = capture();

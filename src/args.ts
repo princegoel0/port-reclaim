@@ -5,6 +5,7 @@ export interface CliOptions {
   yes: boolean;
   list: boolean;
   noColor: boolean;
+  json: boolean;
   match?: string;
 }
 
@@ -13,6 +14,7 @@ const VERSION_FLAGS = new Set(["--version", "-v"]);
 const YES_FLAGS = new Set(["--yes", "-y", "--force", "-f"]);
 const LIST_FLAGS = new Set(["--list", "-l"]);
 const NO_COLOR_FLAGS = new Set(["--no-color"]);
+const JSON_FLAGS = new Set(["--json", "-j"]);
 const MATCH_FLAGS = new Set(["--match", "-m"]);
 
 function parsePort(value: string): number | undefined {
@@ -22,7 +24,7 @@ function parsePort(value: string): number | undefined {
 }
 
 export function parseArgs(argv: string[]): CliOptions | undefined {
-  const options: CliOptions = { ports: [], help: false, version: false, yes: false, list: false, noColor: false };
+  const options: CliOptions = { ports: [], help: false, version: false, yes: false, list: false, noColor: false, json: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (MATCH_FLAGS.has(arg)) {
@@ -44,6 +46,8 @@ export function parseArgs(argv: string[]): CliOptions | undefined {
       options.list = true;
     } else if (NO_COLOR_FLAGS.has(arg)) {
       options.noColor = true;
+    } else if (JSON_FLAGS.has(arg)) {
+      options.json = true;
     } else {
       const port = parsePort(arg);
       if (port === undefined) return undefined;

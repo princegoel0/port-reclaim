@@ -56,6 +56,7 @@ Both TCP and UDP listeners are discovered. Discovery costs one `netstat`/`lsof` 
 | `-l`, `--list` | Report what is using each port without killing anything. |
 | `-y`, `--yes` | Terminate processes from other directories without prompting. |
 | `-m`, `--match REGEX` | Reclaim every port held by a process whose name matches REGEX, instead of naming ports. |
+| `-j`, `--json` | Print a machine-readable report. Never terminates anything. |
 | `--no-color` | Disable coloured output. |
 | `-h`, `--help` | Show the help message. |
 | `-v`, `--version` | Show the installed version. |
@@ -80,6 +81,21 @@ Port 4951 is free inside WSL, but a Windows tcp listener 'node.exe' (PID 19220) 
 ```
 
 It still exits `0`, because the port genuinely is free in your WSL namespace and your server will start — only `localhost` from Windows keeps reaching the other process. Reclaim it from Windows, or set `networkingMode=mirrored` in `.wslconfig` to share one space. WSL's own forwarding helper (`wslrelay`) is ignored deliberately: it mirrors ports your WSL processes already serve, so reporting it would be a false alarm. Windows processes are never killed from WSL.
+
+### Machine-readable output
+
+`--json` reports and never terminates, which makes it safe to drop into CI:
+
+```sh
+port-reclaim 3000 5173 --json
+```
+
+```json
+{"ports":[{"port":3000,"state":"occupied","processes":[{"pid":28468,"name":"node","protocol":"tcp","ageMs":4341.3,"ports":[3000],"cwd":"C:\\repo","alwaysConfirm":false}],"host":null},
+{"port":5173,"state":"free","processes":[],"host":null}]}
+```
+
+Each port carries a `state`: `free`, `occupied`, `invisible` (something holds it but the owner is not visible to this user), `host-occupied` (a Windows process holds it while you are in WSL2 NAT), `unverifiable`, or `protected`. `--match` works too and echoes the pattern. `--json` cannot be combined with `--yes`, since that would ask for a report and an action at the same time.
 
 ### Colour
 
