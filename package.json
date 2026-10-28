@@ -31,7 +31,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node --test dist/tests/process.test.js dist/tests/args.test.js dist/tests/config.test.js dist/tests/style.test.js dist/tests/cli.test.js",
+    "test": "npm run build && node --test dist/tests/process.test.js dist/tests/args.test.js dist/tests/config.test.js dist/tests/style.test.js dist/tests/cli.test.js dist/tests/integration.test.js",
     "prepublishOnly": "npm test"
   },
   "keywords": [
