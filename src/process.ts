@@ -195,16 +195,28 @@ export function parsePsTable(output: string): ProcessRow[] {
   const rows: ProcessRow[] = [];
   const seen = new Set<number>();
   for (const line of output.split(/\r?\n/)) {
-    const match = /^\s*(\d+)\s+(.+?)\s+(\S+)\s*$/.exec(line);
+    // pid and etime are single tokens, so everything after them is args - which procps only
+    // leaves untruncated when it is the final column.
+    const match = /^\s*(\d+)\s+(\S+)\s+(.+)$/.exec(line);
     if (!match) continue;
     const pid = Number(match[1]);
     if (!Number.isInteger(pid) || pid <= 0 || seen.has(pid)) continue;
     seen.add(pid);
-    // Some platforms report the executable path; name matching must see the command itself.
-    const name = match[2].trim().split("/").filter(Boolean).pop() ?? "unknown";
-    rows.push({ pid, name, ageMs: parseEtime(match[3]) });
+    rows.push({ pid, name: commandName(match[3]), ageMs: parseEtime(match[2]) });
   }
   return rows;
+}
+
+// The command name comes from argv[0], not from ps's comm/ucomm columns: macOS truncates the
+// path in comm to 16 characters, and Node 24 renames its main thread so comm reports
+// "MainThread" on Linux. Neither would match the name-based protection rules.
+export function commandName(args: string): string {
+  const trimmed = args.trim();
+  if (!trimmed) return "unknown";
+  const quoted = trimmed.startsWith('"');
+  const first = quoted ? (/"([^"]*)"/.exec(trimmed)?.[1] ?? "") : (trimmed.split(/\s+/)[0] ?? "");
+  const segments = first.split("/").filter(Boolean);
+  return segments[segments.length - 1] ?? "unknown";
 }
 
 async function run(command: string, args: string[], checked = false): Promise<string> {
@@ -242,10 +254,10 @@ async function processNames(pids: number[]): Promise<Map<number, ProcessRow>> {
   if (process.platform === "win32") {
     return byPid(parsePipeTable(await powershell(windowsNamesScript(pids))));
   }
-  // ucomm is the accounting command name. macOS `comm` returns the executable path truncated to
-  // 16 characters, which breaks every name-based rule: Docker and data-service protection match
-  // against it, and users are shown '/Users/runner/ho' instead of 'node'.
-  return byPid(parsePsTable(await run("ps", ["-p", pids.join(","), "-o", "pid=,ucomm=,etime="])));
+  // args last: procps truncates any earlier args column to a fixed width. comm/ucomm are not
+  // usable as names - macOS cuts the path at 16 characters and Node 24 renames its main thread,
+  // which would silently defeat every name-based protection rule.
+  return byPid(parsePsTable(await run("ps", ["-ww", "-p", pids.join(","), "-o", "pid=,etime=,args="])));
 }
 
 async function discoverUnix(port: number): Promise<Discovered[]> {

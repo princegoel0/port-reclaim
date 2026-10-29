@@ -7,6 +7,7 @@ export {
   parsePsTable,
   parseUnixLsof,
   parseUnixLsofListeners,
+  commandName,
   isProtectedService,
   isWslInfrastructure,
   refusalReason,

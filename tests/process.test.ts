@@ -8,6 +8,7 @@ import {
   parsePsTable,
   parseUnixLsof,
   parseUnixLsofListeners,
+  commandName,
   isProtectedService,
   isWslInfrastructure,
   refusalReason,
@@ -28,17 +29,25 @@ test("parses ps etime durations", () => {
   assert.equal(parseEtime("1:2:3:4"), undefined);
 });
 
-test("parses one batched ps table, keeping spaces in command names", () => {
+test("derives the command name from argv[0], not from the thread name", () => {
+  assert.equal(commandName("/usr/bin/node -e require('net')"), "node");
+  assert.equal(commandName("node server.js"), "node");
+  assert.equal(commandName('"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --flag'), "Google Chrome");
+  assert.equal(commandName("/usr/bin/docker-proxy"), "docker-proxy");
+  assert.equal(commandName(""), "unknown");
+});
+
+test("parses one batched ps table and names processes from args", () => {
   const output = [
-    "  1234 node             01:02:03",
-    "  5678 Google Chrome        45:00",
-    "  99 /usr/local/bin/node 00:05",
+    "  1234 01:02:03 /usr/bin/node -e require('net')",
+    '  5678 45:00 "/opt/app/Google Chrome.app/Contents/MacOS/Google Chrome" --flag',
+    "  99 00:05 MainThread",
     "ps: unknown process 9999",
   ].join("\n");
   assert.deepEqual(parsePsTable(output), [
     { pid: 1234, name: "node", ageMs: 3723000 },
     { pid: 5678, name: "Google Chrome", ageMs: 2700000 },
-    { pid: 99, name: "node", ageMs: 5000 },
+    { pid: 99, name: "MainThread", ageMs: 5000 },
   ]);
 });
 

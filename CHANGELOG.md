@@ -23,14 +23,14 @@ bumps as potentially breaking for the programmatic API.
 
 ### Fixed
 
-- **macOS showed a truncated path instead of a process name.** `ps -o comm=` on macOS returns
-  the executable path cut to 16 characters, so a prompt read
-  `Port 3000 is used by '/Users/runner/ho'` where it should say `node`. Every name-based rule
-  matches against that value, so the Docker refusal and the data-service always-prompt list
-  could silently fail to fire on macOS — protection that looked active but was not. Discovery
-  now reads `ucomm`, the accounting command name, which returns the same short name on Linux.
-  Names are also reduced to their final path segment as a fallback. This affected 0.2.0
-  through 0.4.1 and was found by the integration tests added in this release.
+- **Process names were wrong on macOS, and on any Node 24 host running Linux.** Discovery read
+  the name from `ps -o comm=`, which on macOS returns the executable path truncated to 16
+  characters — a prompt read `'/Users/runner/ho'` where it should say `node` — and on Linux
+  reports the kernel *thread* name, which Node 24 renames, so every process appeared as
+  `MainThread`. This was not cosmetic: the Docker refusal and the always-prompt data-service list
+  both match on that value, so on those platforms the protections silently did nothing. Names now
+  come from `argv[0]` via `ps -o args=`, which reports the same thing everywhere. Wrong on macOS
+  since 0.1.0, and on Node 24 Linux since 0.2.0.
 
 ### Testing
 
