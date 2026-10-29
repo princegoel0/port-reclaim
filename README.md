@@ -194,7 +194,7 @@ npm test
 npm run build
 ```
 
-Pull requests are tested on Ubuntu, macOS, and Windows with Node.js 18, 20, and 22.
+Pull requests are tested on Ubuntu, macOS, and Windows with Node.js 18, 20, 22, and 24.
 
 ## License
 
