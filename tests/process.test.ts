@@ -32,11 +32,13 @@ test("parses one batched ps table, keeping spaces in command names", () => {
   const output = [
     "  1234 node             01:02:03",
     "  5678 Google Chrome        45:00",
+    "  99 /usr/local/bin/node 00:05",
     "ps: unknown process 9999",
   ].join("\n");
   assert.deepEqual(parsePsTable(output), [
     { pid: 1234, name: "node", ageMs: 3723000 },
     { pid: 5678, name: "Google Chrome", ageMs: 2700000 },
+    { pid: 99, name: "node", ageMs: 5000 },
   ]);
 });
 

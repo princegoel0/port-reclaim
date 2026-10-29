@@ -21,6 +21,17 @@ bumps as potentially breaking for the programmatic API.
 - Dependabot for npm and GitHub Actions, reviewed monthly.
 - README badges for version, downloads, CI status and license.
 
+### Fixed
+
+- **macOS showed a truncated path instead of a process name.** `ps -o comm=` on macOS returns
+  the executable path cut to 16 characters, so a prompt read
+  `Port 3000 is used by '/Users/runner/ho'` where it should say `node`. Every name-based rule
+  matches against that value, so the Docker refusal and the data-service always-prompt list
+  could silently fail to fire on macOS — protection that looked active but was not. Discovery
+  now reads `ucomm`, the accounting command name, which returns the same short name on Linux.
+  Names are also reduced to their final path segment as a fallback. This affected 0.2.0
+  through 0.4.1 and was found by the integration tests added in this release.
+
 ### Testing
 
 - New integration tests spawn real TCP and UDP listeners in their own process and make the

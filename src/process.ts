@@ -200,7 +200,9 @@ export function parsePsTable(output: string): ProcessRow[] {
     const pid = Number(match[1]);
     if (!Number.isInteger(pid) || pid <= 0 || seen.has(pid)) continue;
     seen.add(pid);
-    rows.push({ pid, name: match[2].trim(), ageMs: parseEtime(match[3]) });
+    // Some platforms report the executable path; name matching must see the command itself.
+    const name = match[2].trim().split("/").filter(Boolean).pop() ?? "unknown";
+    rows.push({ pid, name, ageMs: parseEtime(match[3]) });
   }
   return rows;
 }
@@ -240,7 +242,10 @@ async function processNames(pids: number[]): Promise<Map<number, ProcessRow>> {
   if (process.platform === "win32") {
     return byPid(parsePipeTable(await powershell(windowsNamesScript(pids))));
   }
-  return byPid(parsePsTable(await run("ps", ["-p", pids.join(","), "-o", "pid=,comm=,etime="])));
+  // ucomm is the accounting command name. macOS `comm` returns the executable path truncated to
+  // 16 characters, which breaks every name-based rule: Docker and data-service protection match
+  // against it, and users are shown '/Users/runner/ho' instead of 'node'.
+  return byPid(parsePsTable(await run("ps", ["-p", pids.join(","), "-o", "pid=,ucomm=,etime="])));
 }
 
 async function discoverUnix(port: number): Promise<Discovered[]> {
