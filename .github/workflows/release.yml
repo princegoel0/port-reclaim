@@ -25,7 +25,7 @@ jobs:
       # No explicit ref: a tag push checks out the tag, while a manual run checks out the
       # branch it was started from, so back-filling an old tag still reads the current
       # CHANGELOG for its notes.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         if: github.event_name == 'push'
